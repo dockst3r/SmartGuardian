@@ -1,0 +1,20 @@
+# ambiente
+.venv/
+__pycache__/
+*.pyc
+
+# dados deste PC: nunca publicar (rede, processos, conversas, chave do VirusTotal)
+settings.json
+smartguardian.db
+smartguardian.db-*
+*.log
+*.log.*
+rules.json
+data/
+relatorios/
+exports/
+quarentena/
+
+# gerado na primeira execução
+ui/icon.ico
+*.tmp

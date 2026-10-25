@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>SmartGuardian</title>
+<style>
+/* Janela principal no estilo do Windows 11 (mesmos tokens do SmartDevices). Navegação lateral à esquerda,
+   conteúdo à direita; tudo é desenhado a partir de api.state(view). */
+:root {
+  --accent: var(--acc-l, #005fb8); --accent-ink: #ffffff;
+  --bg: #f3f3f3; --bg-2: #ebebeb; --ink: #1b1b1b; --ink-2: #5f5f5f; --ink-3: #8a8a8a;
+  --tile: #fbfbfb; --tile-hover: #f6f6f6; --tile-press: #f0f0f0; --card: #ffffff;
+  --line: rgba(0,0,0,.08); --line-2: rgba(0,0,0,.14); --hover: rgba(0,0,0,.04); --press: rgba(0,0,0,.025);
+  --good: #0f7b0f; --good-bg: #dff6dd; --warn: #9d5d00; --warn-bg: #fff4ce; --bad: #c42b1c; --bad-bg: #fde7e9;
+  --info-bg: #e6f0fa; --shadow: 0 8px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.08);
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: var(--acc-d, #4cc2ff); --accent-ink: #000000;
+    --bg: #202020; --bg-2: #1b1b1b; --ink: #ffffff; --ink-2: #c5c5c5; --ink-3: #8f8f8f;
+    --tile: #2d2d2d; --tile-hover: #323232; --tile-press: #272727; --card: #2b2b2b;
+    --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.14); --hover: rgba(255,255,255,.06); --press: rgba(255,255,255,.04);
+    --good: #6ccb5f; --good-bg: #2a3a28; --warn: #fce100; --warn-bg: #433519; --bad: #ff99a4; --bad-bg: #442726;
+    --info-bg: #1f3446; --shadow: 0 8px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); cursor: default; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-thumb { background: transparent; border: 4px solid transparent; border-radius: 8px; background-clip: padding-box; }
+:hover::-webkit-scrollbar-thumb { background-color: var(--ink-3); }
+
+.app { display: grid; grid-template-columns: 228px minmax(0, 1fr); height: 100%; }
+nav { padding: 10px 6px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-2); border-right: 1px solid var(--line); overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 12px; font-weight: 600; }
+.brand svg { width: 20px; height: 20px; color: var(--accent); }
+.brand .pill { margin-left: auto; }
+nav button { display: flex; align-items: center; gap: 12px; border: 0; background: transparent; text-align: left; padding: 8px 10px; border-radius: 4px; position: relative; font-size: 13.5px; }
+nav button:hover { background: var(--hover); }
+nav button[aria-current="page"] { background: var(--hover); font-weight: 600; }
+nav button[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--accent); }
+nav .badge { margin-left: auto; font-size: 11px; font-weight: 600; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center; background: var(--bad); color: #fff; }
+nav .badge.warn { background: var(--warn); color: var(--bg); }
+nav .sep { height: 1px; background: var(--line); margin: 6px 8px; }
+nav .grow { flex: 1; }
+main { overflow-y: auto; padding: 22px 28px 28px; min-width: 0; }
+main h2 { font: 600 24px/1.2 var(--display); margin: 0 0 4px; }
+.sub { color: var(--ink-2); font-size: 13px; margin: 0; }
+.view { display: grid; gap: 16px; align-content: start; }
+.vhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.card h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card h3 small { font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.grid { display: grid; gap: 12px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: 3fr 2fr; }
+.btn { border: 1px solid var(--line-2); background: var(--tile); border-radius: 4px; padding: 5px 12px; font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+.btn:hover { background: var(--tile-hover); }
+.btn:active { background: var(--tile-press); color: var(--ink-2); }
+.btn:disabled { opacity: .55; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 90%, var(--bg)); }
+.btn.danger { color: var(--bad); }
+.btn.small { padding: 2px 9px; font-size: 12px; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--accent); background: var(--info-bg); }
+.pill.mute { color: var(--ink-2); background: var(--hover); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink-2); }
+.num { font-variant-numeric: tabular-nums; }
+.empty { color: var(--ink-2); font-size: 13px; padding: 10px 0; }
+
+.status { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 18px 20px; }
+.status .shield { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+.status .shield svg { width: 28px; height: 28px; }
+.status.ok .shield { background: var(--good-bg); color: var(--good); }
+.status.warn .shield { background: var(--warn-bg); color: var(--warn); }
+.status.bad .shield { background: var(--bad-bg); color: var(--bad); }
+.status .txt { flex: 1; min-width: 220px; }
+.status .txt b { font: 600 18px/1.25 var(--display); display: block; }
+.banner { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 6px; font-size: 13px; }
+.banner.info { background: var(--info-bg); }
+.banner.warn { background: var(--warn-bg); }
+.banner svg { color: var(--accent); }
+.banner.warn svg { color: var(--warn); }
+.banner span { flex: 1; }
+
+.metric { display: grid; gap: 4px; }
+.metric .lbl { font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 8px; }
+.metric .lbl span:first-child { flex: none; }
+.metric .lbl span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric .val { font: 600 22px/1.15 var(--display); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.metric .val small { font: 400 12px var(--font); color: var(--ink-2); }
+.spark { width: 100%; height: 36px; display: block; }
+.spark .area { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.spark .ln { fill: none; stroke: var(--accent); stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+.spark .gl { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+.list { display: grid; }
+.row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+.row:first-child { border-top: 0; }
+.row.link { cursor: pointer; }
+.row.link:hover { background: var(--hover); margin: 0 -8px; padding-inline: 8px; border-radius: 4px; }
+.row .grow { flex: 1; min-width: 0; }
+.row .grow b { font-weight: 600; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .grow span { font-size: 12px; color: var(--ink-2); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ico { width: 32px; height: 32px; border-radius: 6px; background: var(--hover); display: grid; place-items: center; flex: none; color: var(--ink-2); }
+.sev { width: 4px; align-self: stretch; border-radius: 2px; flex: none; min-height: 28px; }
+.sev.bad { background: var(--bad); } .sev.warn { background: var(--warn); } .sev.info { background: var(--accent); } .sev.ok { background: var(--good); }
+
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--ink-2); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--tile); }
+td { padding: 7px 12px; border-top: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+tr:first-child td { border-top: 0; }
+tbody tr.link { cursor: pointer; }
+tbody tr:hover td { background: var(--hover); }
+tbody tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+td.r, th.r { text-align: right; }
+td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
+.clip { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.score { display: inline-flex; align-items: center; gap: 8px; }
+.score .bar { width: 48px; height: 4px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.score .bar i { display: block; height: 100%; border-radius: 2px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.search { display: flex; align-items: center; gap: 8px; background: var(--tile); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 10px; min-width: 0; flex: 1 1 220px; max-width: 340px; }
+.search input { border: 0; background: transparent; padding: 6px 0; outline: none; width: 100%; font-size: 13px; }
+.chip { border: 1px solid var(--line-2); background: var(--tile); border-radius: 14px; padding: 3px 12px; font-size: 12.5px; }
+.chip:hover { background: var(--tile-hover); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+.info-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.info-strip div { background: var(--card); padding: 10px 14px; min-width: 0; }
+.info-strip span { display: block; font-size: 11.5px; color: var(--ink-2); }
+.info-strip b { font-weight: 600; font-size: 13.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.detail { display: grid; gap: 12px; position: sticky; top: 0; }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px 10px; font-size: 12.5px; margin: 0; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.reasons { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.reasons li { display: flex; gap: 10px; justify-content: space-between; }
+.reasons li b { font-variant-numeric: tabular-nums; color: var(--bad); flex: none; }
+.reasons li.minus b { color: var(--good); }
+.progress { height: 3px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); transition: width .3s linear; }
+
+.chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; height: calc(100vh - 50px); }
+.chat .msgs { max-width: 920px; width: 100%; justify-self: center; }
+.chat > .vhead { align-items: flex-start; }
+.chat > .vhead > .btn-row { padding-top: 4px; }
+.chat-title { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 4px; }
+.chat-title b { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist { position: relative; }
+.hist-pop { position: absolute; right: 0; top: calc(100% + 6px); width: 360px; max-width: calc(100vw - 280px); max-height: min(460px, 65vh); overflow-y: auto;
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 6px; z-index: 25; display: grid; gap: 2px; }
+.hist-pop .c { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 4px; }
+.hist-pop .c:hover, .hist-pop .c.on { background: var(--hover); }
+.hist-pop .c.on > button:first-child { font-weight: 600; }
+.hist-pop .c > button { border: 0; background: transparent; text-align: left; padding: 8px 10px; min-width: 0; font-size: 13px; }
+.hist-pop .c > button span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-pop .c > button small { display: block; font-size: 11.5px; color: var(--ink-3); font-weight: 400; }
+.hist-pop .c .del { width: 32px; height: 32px; margin-right: 4px; padding: 0; display: grid; place-items: center; border-radius: 4px; color: var(--ink-3); }
+.hist-pop .c .del:hover { color: var(--bad); background: var(--bad-bg); }
+/* linha de status do assistente: pílula + botão de ícone na mesma altura */
+.ai-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 28px; }
+.icon-btn { width: 28px; height: 28px; border: 0; background: transparent; border-radius: 4px; display: grid; place-items: center; padding: 0; color: var(--ink-2); }
+.icon-btn:hover { background: var(--hover); color: var(--ink); }
+.icon-btn:active { background: var(--press); }
+.hist-pop .empty { padding: 10px; }
+.name-btn { border: 0; background: transparent; padding: 3px 6px; margin: -3px -6px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; text-align: left; }
+.name-btn svg { opacity: 0; width: 13px; height: 13px; color: var(--ink-2); }
+.name-btn:hover { background: var(--hover); }
+.name-btn:hover svg, .name-btn:focus-visible svg { opacity: 1; }
+.name-in { font: inherit; font-weight: 600; background: var(--bg); border: 1px solid var(--line-2); border-bottom: 2px solid var(--accent); border-radius: 4px; padding: 2px 6px; width: 220px; outline: none; }
+.msgs { overflow-y: auto; display: grid; gap: 12px; align-content: start; padding-right: 4px; }
+.msg { max-width: 80%; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.msg.me { justify-self: end; background: var(--accent); color: var(--accent-ink); }
+.msg.ai { background: var(--card); border: 1px solid var(--line); }
+.msg.err { background: var(--bad-bg); }
+.msg .who { font-size: 11.5px; color: var(--ink-2); margin-bottom: 4px; display: flex; gap: 6px; align-items: center; white-space: normal; }
+.composer { display: flex; gap: 8px; align-items: center; background: var(--card); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 6px 6px 12px; }
+.composer input { flex: 1; border: 0; background: transparent; outline: none; padding: 6px 0; min-width: 0; }
+.dots::after { content: "…"; animation: dots 1.2s steps(4) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
+@keyframes dots { from { width: 0; } to { width: 1.2em; } }
+
+.set-group { display: grid; gap: 2px; }
+.set-group > h4 { font-size: 13px; font-weight: 600; margin: 8px 0 6px; }
+.set { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; flex-wrap: wrap; }
+.set .grow { flex: 1; min-width: 200px; }
+.set .grow b { font-weight: 400; display: block; font-size: 13.5px; }
+.set .grow span { font-size: 12px; color: var(--ink-2); }
+.set input[type=text], .set input[type=password], .set select, .field { background: var(--tile); border: 1px solid var(--line-2); border-bottom-color: var(--ink-2); border-radius: 4px; padding: 5px 8px; font-size: 13px; width: 240px; max-width: 100%; }
+.toggle { position: relative; width: 40px; height: 20px; flex: none; display: inline-block; }
+.toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; z-index: 1; }
+.toggle i { position: absolute; inset: 0; border-radius: 10px; border: 1px solid var(--ink-2); transition: background .15s; }
+.toggle i::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-2); top: 3px; left: 4px; transition: left .15s; }
+.toggle input:checked + i { background: var(--accent); border-color: var(--accent); }
+.toggle input:checked + i::after { left: 22px; background: var(--accent-ink); }
+.toggle input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
+.toggle input:disabled + i { opacity: .5; }
+
+.toast { position: fixed; right: 20px; bottom: 20px; width: 360px; max-width: calc(100vw - 40px); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 12px 16px; display: grid; gap: 2px; z-index: 30; font-size: 13px; overflow-wrap: anywhere; }
+.toast.bad { border-left: 4px solid var(--bad); }
+.toast b { font-size: 13.5px; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 40; }
+.modal { background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); width: 440px; max-width: calc(100vw - 32px); overflow: hidden; }
+.modal .mb { padding: 20px 24px; display: grid; gap: 10px; }
+.modal h4 { font: 600 18px var(--display); margin: 0; }
+.modal p { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.modal .mf { background: var(--bg-2); border-top: 1px solid var(--line); padding: 16px 24px; display: flex; gap: 8px; justify-content: flex-end; }
+.modal .mf .btn { min-width: 110px; justify-content: center; }
+.modal .btn.primary.danger { background: #c42b1c; color: #fff; }
+.modal .btn.primary.danger:hover { background: #b0261a; }
+
+@media (max-width: 1100px) { .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .split, .g3 { grid-template-columns: minmax(0, 1fr); } .detail { position: static; } }
+@media (max-width: 860px) { .app { grid-template-columns: 56px minmax(0, 1fr); } nav .lb, nav .badge, .brand span, .brand .pill { display: none; } .g2 { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav id="nav" aria-label="Seções"></nav>
+  <main id="main"><div class="empty">Carregando…</div></main>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+<div class="modal-bg" id="modal" hidden></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const I = {
+  home: '<path d="M2.5 7 8 2.5 13.5 7v6.5h-4v-4h-3v4h-4z"/>',
+  net: '<rect x="6" y="1.5" width="4" height="3.5" rx=".6"/><rect x="1.5" y="11" width="4" height="3.5" rx=".6"/><rect x="10.5" y="11" width="4" height="3.5" rx=".6"/><path d="M8 5v3M3.5 11V8h9v3"/>',
+  conn: '<path d="M6.5 9.5 9.5 6.5M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1"/>',
+  proc: '<rect x="4" y="4" width="8" height="8" rx="1"/><path d="M6.5 1.5v2.5M9.5 1.5v2.5M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5"/>',
+  apps: '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><path d="M11.5 9.5v4M9.5 11.5h4"/>',
+  bell: '<path d="M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3zM6.5 14h3"/>',
+  ai: '<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6z"/>',
+  gear: '<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',
+  shield: '<path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/>',
+  shieldok: '<path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/><path d="m5.6 8 1.7 1.7L10.6 6.4"/>',
+  shieldx: '<path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/><path d="M8 5v3.5M8 10.6v.1"/>',
+  pc: '<rect x="1.5" y="2.5" width="13" height="8.5" rx="1"/><path d="M5.5 14h5M8 11v3"/>',
+  phone: '<rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/>',
+  tv: '<rect x="1.5" y="3" width="13" height="8.5" rx="1"/><path d="M5 14h6"/>',
+  router: '<rect x="1.5" y="9" width="13" height="4.5" rx="1"/><path d="M4 11.2h.1M6.5 11.2h.1M11 9V5M5.5 4.5a3.5 3.5 0 0 1 5 0M3.8 2.8a6 6 0 0 1 8.4 0"/>',
+  chip: '<rect x="4" y="4" width="8" height="8" rx="1"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2"/>',
+  printer: '<path d="M4.5 6V2h7v4M4.5 11.5h-3V6h13v5.5h-3"/><rect x="4.5" y="9.5" width="7" height="4.5"/>',
+  speaker: '<circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="2.5"/>',
+  search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/>',
+  refresh: '<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3"/>',
+  send: '<path d="M2 8 14 2.5 10.5 14 8 9z"/>',
+  folder: '<path d="M1.5 4h5l1.5 1.5h6.5v8h-13z"/>',
+  stop: '<rect x="3.5" y="3.5" width="9" height="9" rx="1"/>',
+  check: '<path d="m3 8.5 3 3 7-7"/>',
+  edit: '<path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5v-3z"/>',
+  box: '<path d="M2 5 8 2l6 3v6l-6 3-6-3zM2 5l6 3 6-3M8 8v6"/>',
+  pause: '<path d="M5.5 3v10M10.5 3v10"/>',
+  trash: '<path d="M2.5 4h11M6 4V2.5h4V4M3.8 4l.7 9.5h7l.7-9.5M6.5 6.5v4.5M9.5 6.5v4.5"/>',
+};
+const ic = (k, cls = "i") => `<svg class="${cls}" viewBox="0 0 16 16">${I[k] || I.pc}</svg>`;
+
+const NAV = [
+  ["overview", "Visão geral", "home"], ["lan", "Rede local", "net", "lan"], ["conns", "Conexões", "conn"],
+  ["procs", "Processos", "proc", "proc"], ["startup", "Inicialização", "apps", "startup"], ["alerts", "Alertas", "bell", "all"],
+  ["sep"], ["ai", "Assistente IA", "ai"], ["grow"], ["settings", "Configurações", "gear"],
+];
+const MANUAL = new Set(["settings", "ai"]);  // telas que não se redesenham sozinhas (têm campos sendo editados)
+
+const st = { view: "overview", visible: true, data: null, pick: null, procFilter: "attn", procQuery: "", lanFilter: "all",
+             connFilter: "internet", startupHideWin: true, startupOnlyNew: false, chat: [], chats: [], chatId: null, aiBusy: false, aiStatus: null, busy: false, editing: null };
+try { st.chatId = +localStorage.getItem("sg.chat") || null; } catch (e) {}
+try { const v = localStorage.getItem("sg.view"); if (v) st.view = v; } catch (e) {}
+
+/* ---------------- utilidades ---------------- */
+async function call(name, ...args) {
+  const r = await window.pywebview.api[name](...args);
+  if (r && r.error) { toast("Não deu certo", r.error, true); throw new Error(r.error); }
+  return r;
+}
+let toastTimer;
+function toast(title, text = "", bad = false) {
+  const t = $("#toast");
+  t.className = "toast" + (bad ? " bad" : "");
+  t.innerHTML = `<b>${esc(title)}</b>${text ? `<span class="muted">${esc(text)}</span>` : ""}`;
+  t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, bad ? 7000 : 4200);
+}
+function modal({ title, text = "", ok = "OK", danger = false, input = null }) {
+  return new Promise(resolve => {
+    const m = $("#modal");
+    m.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><div class="mb"><h4>${esc(title)}</h4>${text ? `<p>${text}</p>` : ""}
+      ${input !== null ? `<input class="field" id="modal-in" type="text" value="${esc(input)}" style="width:100%">` : ""}</div>
+      <div class="mf"><button class="btn primary ${danger ? "danger" : ""}" id="modal-ok">${esc(ok)}</button><button class="btn" id="modal-no">Cancelar</button></div></div>`;
+    m.hidden = false;
+    const done = v => { m.hidden = true; m.innerHTML = ""; resolve(v); };
+    $("#modal-ok").onclick = () => done(input !== null ? $("#modal-in").value : true);
+    $("#modal-no").onclick = () => done(input !== null ? null : false);
+    m.onkeydown = e => { if (e.key === "Escape") done(input !== null ? null : false); if (e.key === "Enter") $("#modal-ok").click(); };
+    (input !== null ? $("#modal-in") : $("#modal-no")).focus();
+  });
+}
+const fmtB = b => b >= 2 ** 30 ? (b / 2 ** 30).toFixed(1).replace(".", ",") + " GB" : b >= 2 ** 20 ? Math.round(b / 2 ** 20) + " MB" : Math.round(b / 1024) + " KB";
+const fmtN = (v, d = 1) => Number(v).toFixed(d).replace(".", ",");
+function ago(ts) {
+  if (!ts) return "—";
+  const s = Math.max(0, st.data.now - ts);
+  if (s < 60) return `há ${Math.round(s)} s`;
+  if (s < 3600) return `há ${Math.round(s / 60)} min`;
+  if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+  return `há ${Math.round(s / 86400)} dia${s >= 172800 ? "s" : ""}`;
+}
+const hm = ts => new Date(ts * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const dayLabel = ts => { const d = new Date(ts * 1000), t = new Date(); const y = new Date(); y.setDate(t.getDate() - 1);
+  return d.toDateString() === t.toDateString() ? "Hoje" : d.toDateString() === y.toDateString() ? "Ontem" : d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }); };
+const uptime = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h >= 24 ? `${Math.floor(h / 24)} d ${h % 24} h` : `${h} h ${m} min`; };
+
+function spark(data, max) {
+  const w = 120, h = 36, n = Math.max(2, data.length);
+  const vals = data.length ? data : [0, 0];
+  max = max || Math.max(1, ...vals) * 1.15;
+  const x = i => (i / (n - 1)) * w, y = v => h - 2 - (Math.min(v, max) / max) * (h - 6);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+    <line class="gl" x1="0" x2="${w}" y1="${y(max / 2)}" y2="${y(max / 2)}"/><polygon class="area" points="0,${h} ${pts} ${x(vals.length - 1)},${h}"/><polyline class="ln" points="${pts}"/></svg>`;
+}
+const SEV = { bad: "Alto", warn: "Atenção", info: "Baixo", ok: "Normal" };
+const scoreCell = (sc, sev) => `<span class="score"><span class="bar"><i style="width:${Math.max(Math.min(sc, 100), 3)}%;background:var(--${sev === "info" ? "accent" : sev === "ok" ? "good" : sev})"></i></span><span class="pill ${sev}">${SEV[sev]} · ${sc}</span></span>`;
+const SIG = { file: "Assinado", catalog: "Assinado (catálogo)", package: "Pacote assinado", none: "Sem assinatura", invalid: "Assinatura inválida", unreadable: "Sem acesso", hidden: "Oculto", kernel: "Interno do Windows" };
+const sigCell = p => ["file", "catalog", "package"].includes(p.sig) ? `<span class="pill ok" title="${esc(SIG[p.sig])}${p.sig_detail ? " · " + esc(p.sig_detail) : ""}">${esc(p.signer || SIG[p.sig])}</span>`
+  : p.sig === "none" ? `<span class="pill warn">Sem assinatura</span>` : p.sig === "invalid" ? `<span class="pill bad">Inválida: ${esc(p.sig_detail)}</span>` : `<span class="pill mute">${SIG[p.sig] || p.sig}</span>`;
+
+/* ---------------- navegação e atualização ---------------- */
+function go(view, pick) {
+  st.view = view; if (pick !== undefined) st.pick = pick;
+  try { localStorage.setItem("sg.view", view); } catch (e) {}
+  $("#main").scrollTop = 0;
+  load(true);
+}
+async function load(force = false) {
+  if (!window.pywebview || (!force && (!st.visible || MANUAL.has(st.view) || st.editing || !$("#modal").hidden))) return;
+  try {
+    const d = await window.pywebview.api.state(st.view);
+    if (d.error) throw new Error(d.error);
+    st.data = d;
+    render();
+  } catch (e) { console.error(e); }
+}
+function render() {
+  if (!st.data) return;
+  renderNav();
+  const main = $("#main"), top = main.scrollTop;
+  const a = document.activeElement, focusId = a && a.id, sel = a && a.selectionStart;
+  main.innerHTML = `<div class="view">${V[st.view]()}</div>`;
+  main.scrollTop = top;
+  if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus(); try { el.setSelectionRange(sel, sel); } catch (e) {} } }
+  if (st.view === "ai") { const m = $("#msgs"); if (m) m.scrollTop = m.scrollHeight; }
+}
+function renderNav() {
+  const s = st.data.summary, k = s.by_kind;
+  const badge = { lan: k.lan, proc: k.proc + k.cpu, startup: k.startup, all: s.open };
+  $("#nav").innerHTML = `<div class="brand">${ic("shieldok")}<span>SmartGuardian</span>${st.data.admin ? "" : '<span class="pill warn">sem admin</span>'}</div>` +
+    NAV.map(([key, l, i, b]) => {
+      if (key === "sep") return '<div class="sep"></div>';
+      if (key === "grow") return '<div class="grow"></div>';
+      const n = b ? badge[b] : 0;
+      return `<button data-go="${key}" ${st.view === key ? 'aria-current="page"' : ""} title="${l}">${ic(i)}<span class="lb">${l}</span>${n ? `<span class="badge ${s.worst === "bad" ? "" : "warn"}">${n}</span>` : ""}</button>`;
+    }).join("");
+}
+
+/* ---------------- telas ---------------- */
+const V = {};
+const alertRow = a => `<div class="row link" data-alert-go="${a.id}"><span class="sev ${a.sev}"></span><div class="grow"><b>${esc(a.title)}</b><span>${esc(a.detail)}</span></div>${a.status === "learning" ? '<span class="pill mute" title="Registrado durante o período de aprendizado, sem aviso">aprendizado</span>' : ""}<span class="muted num" style="font-size:12px">${hm(a.ts)}</span></div>`;
+const devName = d => d.alias || d.name || (d.self ? "Este PC" : d.gateway ? "Roteador" : "Sem nome");
+const devPill = d => d.self ? '<span class="pill info">Este PC</span>' : !d.known ? '<span class="pill warn">Novo</span>' : !d.online ? '<span class="pill mute">Fora da rede</span>' : '<span class="pill ok">Conhecido</span>';
+
+function statusCard() {
+  const s = st.data.summary;
+  const cls = s.worst || "ok";
+  const title = s.open ? `${s.open} ${s.open === 1 ? "item pede" : "itens pedem"} sua atenção` : "Tudo certo";
+  const sub = s.open ? "Abra os alertas para ver o que foi encontrado e o que fazer." : "Nada fora do normal nos processos, na rede e na inicialização.";
+  return `<div class="card status ${cls}"><div class="shield">${ic(s.open ? "shieldx" : "shieldok")}</div>
+    <div class="txt"><b>${title}</b><span class="muted">${sub} Última verificação ${ago(s.last_check)}.</span></div>
+    <div class="btn-row">${s.open ? '<button class="btn primary" data-go="alerts">Ver alertas</button>' : ""}<button class="btn" data-act="check">${ic("refresh")}Verificar agora</button></div></div>`;
+}
+function banners() {
+  const s = st.data.summary, out = [];
+  if (!st.data.admin) out.push(`<div class="banner warn">${ic("shieldx")}<span>Rodando sem administrador: parte dos processos e conexões fica oculta e não dá para encerrar processos nem mexer na inicialização. Feche e abra pelo atalho para o Windows pedir permissão.</span></div>`);
+  if (s.learning_left > 0) out.push(`<div class="banner info">${ic("ai")}<span><b>Período de aprendizado:</b> faltam ${fmtN(s.learning_left, s.learning_left < 1 ? 1 : 0)} dia${s.learning_left >= 1.5 ? "s" : ""}. O que já roda no PC vira o normal. Por enquanto, processos só geram aviso pelas regras fortes (o resto fica registrado em Alertas); mudanças na inicialização e aparelhos novos avisam normalmente.</span></div>`);
+  if (s.paused_until) out.push(`<div class="banner warn">${ic("pause")}<span>Avisos pausados até ${hm(s.paused_until)}. O monitoramento continua.</span><button class="btn small" data-pause="0">Retomar</button></div>`);
+  return out.join("");
+}
+function metrics() {
+  const S = st.data.system, h = S.hist, last = a => a.length ? a[a.length - 1] : 0;
+  return `<div class="grid g4">
+    <div class="card metric"><div class="lbl"><span>Processador</span><span title="${esc(S.cpu_name)}">${esc(S.cpu_name.replace(/\s*\d+-Core Processor|\(R\)|\(TM\)/g, ""))}</span></div><div class="val">${fmtN(last(h.cpu), 0)}<small> %</small></div>${spark(h.cpu, 100)}</div>
+    <div class="card metric"><div class="lbl"><span>Memória</span><span>${fmtB(S.mem_total)}</span></div><div class="val">${fmtB(S.mem_used)}<small> · ${fmtN(last(h.mem), 0)} %</small></div>${spark(h.mem, 100)}</div>
+    <div class="card metric"><div class="lbl"><span>Disco ${esc(S.drive)}</span><span>${fmtB(S.disk_total)}</span></div><div class="val">${fmtB(S.disk_used)}<small> · ${fmtN(last(h.disk), 0)} %</small></div>${spark(h.disk, 100)}</div>
+    <div class="card metric"><div class="lbl"><span>Rede</span><span>↑ ${fmtN(last(h.up))} Mb/s</span></div><div class="val">${fmtN(last(h.down))}<small> Mb/s ↓</small></div>${spark(h.down)}</div></div>`;
+}
+
+V.overview = () => {
+  const d = st.data, S = d.system;
+  return `<div class="vhead"><div><h2>Visão geral</h2><p class="sub">${esc(S.host)} · ${esc(S.os)} · ligado há ${uptime(S.uptime)}</p></div></div>
+  ${banners()}${statusCard()}${metrics()}
+  <div class="grid g3">
+    <div class="card"><h3>Alertas recentes <button class="btn small" data-go="alerts">Todos</button></h3><div class="list">
+      ${d.alerts.length ? d.alerts.map(alertRow).join("") : '<div class="empty">Nenhum alerta até agora.</div>'}</div></div>
+    <div class="card"><h3>Na rede agora <small>${d.counts.devices} aparelho${d.counts.devices === 1 ? "" : "s"}${d.counts.new_devices ? ` · ${d.counts.new_devices} novo${d.counts.new_devices > 1 ? "s" : ""}` : ""}</small></h3><div class="list">
+      ${d.devices.length ? d.devices.map(v => `<div class="row link" data-go="lan"><div class="ico">${ic(v.kind)}</div><div class="grow"><b>${esc(devName(v))}</b><span>${v.ip} · ${esc(v.vendor || "fabricante desconhecido")}</span></div>${devPill(v)}</div>`).join("") : '<div class="empty">A primeira varredura começa em alguns segundos.</div>'}</div></div>
+  </div>
+  ${d.risky.length ? `<div class="card"><h3>Processos que pedem atenção <button class="btn small" data-go="procs">Processos</button></h3><div class="list">${d.risky.map(p => `<div class="row link" data-proc="${p.pid}"><span class="sev ${p.sev}"></span><div class="grow"><b>${esc(p.name)} <span class="muted num" style="font-weight:400">${p.pid}</span></b><span>${esc(p.exe)}</span></div>${scoreCell(p.score, p.sev)}</div>`).join("")}</div></div>` : ""}
+  <div class="card"><h3>Mais memória agora <button class="btn small" data-go="procs">Processos</button></h3><div class="list">
+    ${d.top_mem.map(p => `<div class="row link" data-proc="${p.pid}"><div class="ico">${ic("proc")}</div><div class="grow"><b>${esc(p.name)}</b><span>${esc(p.exe || "—")}</span></div><span class="num muted">${fmtB(p.rss)}</span></div>`).join("")}</div></div>`;
+};
+
+V.lan = () => {
+  const d = st.data, n = d.net || {}, L = d.lan || {};
+  const rows = d.devices.filter(v => st.lanFilter === "all" ? true : st.lanFilter === "online" ? v.online : !v.known);
+  const scanning = d.scan !== null && d.scan !== undefined;
+  return `<div class="vhead"><div><h2>Rede local</h2><p class="sub">Faixa ${esc(L.range || "…")} · ${d.lan_interval ? `varredura a cada ${Math.round(d.lan_interval / 60)} min` : "varredura só manual"} · última ${ago(L.ts)}</p></div>
+    <button class="btn primary" data-act="scan" ${scanning ? "disabled" : ""}>${ic("refresh")}${scanning ? `Escaneando… ${Math.round(d.scan * 100)} %` : "Escanear agora"}</button></div>
+  ${scanning ? `<div class="progress"><i style="width:${Math.round(d.scan * 100)}%"></i></div>` : ""}
+  <div class="info-strip">
+    <div><span>Conexão</span><b>${esc(n.type || "…")}${n.ssid ? " · " + esc(n.ssid) : ""}${n.iface ? ` <span class="muted" style="font-weight:400">(${esc(n.iface)})</span>` : ""}</b></div>
+    <div><span>Este PC</span><b class="mono">${esc(n.ip || "…")}</b></div>
+    <div><span>Roteador</span><b class="mono">${esc(n.gateway || "…")}${n.gateway_ms != null ? ` · ${n.gateway_ms} ms` : ""}</b></div>
+    <div><span>DNS</span><b class="mono">${esc((n.dns || []).join(" · ") || "…")}</b></div>
+    <div><span>IP público</span><b class="mono">${n.public_ip ? esc(n.public_ip) : '<span class="muted" style="font-family:var(--font);font-weight:400" title="Ligue em Configurações">desligado</span>'}</b></div>
+    <div><span>Internet</span><b style="color:var(--${n.internet_ms != null ? "good" : "bad"})">${n.internet_ms != null ? `OK · ${n.internet_ms} ms` : n.ts ? "Sem resposta" : "…"}</b></div>
+  </div>
+  <div class="toolbar">
+    <button class="chip" data-lanf="all" aria-pressed="${st.lanFilter === "all"}">Todos (${d.devices.length})</button>
+    <button class="chip" data-lanf="online" aria-pressed="${st.lanFilter === "online"}">Na rede agora (${d.devices.filter(v => v.online).length})</button>
+    <button class="chip" data-lanf="new" aria-pressed="${st.lanFilter === "new"}">Novos (${d.devices.filter(v => !v.known).length})</button>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Dispositivo</th><th>IP</th><th>MAC</th><th>Fabricante</th><th class="r">Resposta</th><th>Visto pela 1ª vez</th><th>Última vez</th><th>Situação</th><th></th></tr></thead>
+    <tbody>${rows.map(v => `<tr>
+      <td><span style="display:inline-flex;gap:10px;align-items:center">${ic(v.kind)}${st.editing === v.mac
+        ? `<input class="name-in" id="dev-edit" value="${esc(v.alias || v.name || "")}" placeholder="${esc(v.name || "Nome do aparelho")}" aria-label="Nome do aparelho">`
+        : `<button class="name-btn" data-edit="${v.mac}" title="Clique para dar um nome">${esc(devName(v))}${ic("edit")}</button>`}${v.alias && v.name && st.editing !== v.mac ? `<span class="muted">${esc(v.name)}</span>` : ""}</span></td>
+      <td class="mono">${v.ip}</td><td class="mono">${v.mac}</td><td class="clip" title="${esc(v.vendor)}">${esc(v.vendor || "—")}</td>
+      <td class="r num">${v.self ? "—" : v.rtt != null ? v.rtt + " ms" : v.online ? '<span class="muted" title="Respondeu na tabela ARP, mas bloqueia ping">sem ping</span>' : "—"}</td>
+      <td>${ago(v.first_seen)}</td><td>${v.online ? "agora" : ago(v.last_seen)}</td><td>${devPill(v)}</td>
+      <td><span class="btn-row">${!v.known ? `<button class="btn small" data-known="${v.mac}">${ic("check")}Conheço</button>` : ""}</span></td>
+    </tr>`).join("") || '<tr><td colspan="9" class="muted">Nenhum aparelho neste filtro.</td></tr>'}</tbody></table></div>
+  <p class="sub">A varredura só manda um ping para cada endereço e lê a tabela ARP do Windows; não abre portas nos aparelhos. Clique no nome de um aparelho para mudar; Enter salva, Esc cancela. Celulares com MAC aleatório aparecem como "MAC aleatório".</p>`;
+};
+
+V.conns = () => {
+  const d = st.data;
+  const rows = d.conns.filter(c => st.connFilter === "all" || c.scope === "internet").sort((a, b) => b.score - a.score || (b.bad_port - a.bad_port) || a.proc.localeCompare(b.proc));
+  const ls = [...d.listens].sort((a, b) => (b.bad_port - a.bad_port) || (a.scope === "pc") - (b.scope === "pc") || a.port - b.port);
+  const SC = { internet: "Internet", local: "Rede local", pc: "Este PC" };
+  return `<div class="vhead"><div><h2>Conexões</h2><p class="sub">${d.conns.length} conexões de ${new Set(d.conns.map(c => c.pid)).size} programas · atualiza a cada ${st.data.interval} s</p></div>
+    <button class="btn" data-act="export">Exportar CSV</button></div>
+  <div class="toolbar">
+    <button class="chip" data-connf="internet" aria-pressed="${st.connFilter === "internet"}">Internet (${d.conns.filter(c => c.scope === "internet").length})</button>
+    <button class="chip" data-connf="all" aria-pressed="${st.connFilter === "all"}">Todas (${d.conns.length})</button>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Programa</th><th>Destino</th><th>IP : porta</th><th>Tipo</th><th>Estado</th><th>Risco do programa</th></tr></thead>
+    <tbody>${rows.map(c => `<tr class="link" data-proc="${c.pid}">
+      <td><b style="font-weight:600">${esc(c.proc)}</b> <span class="muted num">${c.pid}</span></td>
+      <td class="clip" title="${esc(c.host || "")}">${c.host === null ? '<span class="muted">procurando nome…</span>' : esc(c.host || "(sem nome DNS)")}</td>
+      <td class="mono">${esc(c.raddr)}:${c.rport}${c.bad_port ? ' <span class="pill bad">porta suspeita</span>' : ""}</td>
+      <td>${SC[c.scope]}</td><td>${esc(c.state)}</td><td>${scoreCell(c.score, c.sev)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nenhuma conexão neste filtro.</td></tr>'}</tbody></table></div>
+  <div class="card"><h3>Portas abertas neste PC <small>quem pode se conectar ao seu computador</small></h3><div class="list">
+    ${ls.map(l => `<div class="row link" data-proc="${l.pid}"><span class="sev ${l.bad_port ? "bad" : l.scope === "pc" ? "ok" : l.all ? "warn" : "info"}"></span><div class="grow"><b class="mono">${esc(l.addr)}:${l.port}</b><span>${esc(l.proc)} · PID ${l.pid}</span></div><span class="muted" style="font-size:12.5px">${l.bad_port ? "Porta usada por ferramentas de invasão" : l.scope === "pc" ? "Só este PC" : l.all ? "Aberta para toda a rede" : "Só numa interface"}</span></div>`).join("") || '<div class="empty">Nenhuma porta TCP aberta.</div>'}
+  </div></div>`;
+};
+
+V.procs = () => {
+  const d = st.data, q = st.procQuery.toLowerCase();
+  const rows = d.procs.filter(p => (st.procFilter === "all" || (st.procFilter === "attn" ? p.score >= 15 : p.sig === "none" || p.sig === "invalid"))
+      && (!q || (p.name + " " + p.exe + " " + p.pid).toLowerCase().includes(q)))
+    .sort((a, b) => b.score - a.score || b.cpu - a.cpu || b.rss - a.rss);
+  const p = d.procs.find(x => x.pid === st.pick) || rows[0];
+  const attn = d.procs.filter(p => p.score >= 15).length, uns = d.procs.filter(p => p.sig === "none" || p.sig === "invalid").length;
+  return `<div class="vhead"><div><h2>Processos</h2><p class="sub">${d.procs.length} processos · ${d.procs.filter(p => p.score >= d.threshold || p.strong).length} acima do limite de aviso (${d.threshold}) · ${uns} sem assinatura válida</p></div></div>
+  <div class="toolbar">
+    <label class="search">${ic("search")}<input id="pq" type="text" placeholder="Nome, caminho ou PID" value="${esc(st.procQuery)}" aria-label="Procurar processo"></label>
+    <button class="chip" data-pf="attn" aria-pressed="${st.procFilter === "attn"}">Com pontuação (${attn})</button>
+    <button class="chip" data-pf="unsigned" aria-pressed="${st.procFilter === "unsigned"}">Sem assinatura (${uns})</button>
+    <button class="chip" data-pf="all" aria-pressed="${st.procFilter === "all"}">Todos (${d.procs.length})</button>
+  </div>
+  <div class="split">
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Nome</th><th class="r">PID</th><th class="r">CPU</th><th class="r">Memória</th><th>Assinatura</th><th>Risco</th></tr></thead>
+      <tbody>${rows.slice(0, 400).map(r => `<tr data-pick="${r.pid}" class="link ${p && r.pid === p.pid ? "sel" : ""}">
+        <td><b style="font-weight:600">${esc(r.name || "(sem nome)")}</b><div class="muted clip" style="font-size:11.5px;max-width:300px" title="${esc(r.exe)}">${esc(r.exe || "—")}</div></td>
+        <td class="r num">${r.pid}</td><td class="r num">${fmtN(r.cpu)} %</td><td class="r num">${fmtB(r.rss)}</td><td>${sigCell(r)}</td><td>${scoreCell(r.score, r.sev)}</td></tr>`).join("")
+        || `<tr><td colspan="6" class="muted">${st.procFilter === "attn" && !q ? "Nenhum processo com pontuação. Tudo normal." : "Nenhum processo encontrado."}</td></tr>`}</tbody></table></div>
+    ${p ? procDetail(p) : ""}
+  </div>`;
+};
+function procDetail(p) {
+  const canAct = p.exe && st.data.admin;
+  return `<aside class="detail">
+    <div class="card">
+      <h3><span>${esc(p.name)} <span class="muted num" style="font-weight:400">${p.pid}</span></span>${scoreCell(p.score, p.sev)}</h3>
+      <dl class="kv">
+        <dt>Local</dt><dd class="mono">${esc(p.exe || "oculto pelo Windows")}</dd>
+        <dt>Assinatura</dt><dd>${sigCell(p)}${p.sig_detail && p.sig !== "invalid" ? ` <span class="muted">${esc(p.sig_detail)}</span>` : ""}</dd>
+        <dt>Aberto por</dt><dd>${esc(p.parent || "?")} <span class="muted num">${p.ppid || ""}</span></dd>
+        ${p.cmdline ? `<dt>Comando</dt><dd class="mono" style="max-height:90px;overflow:auto">${esc(p.cmdline)}</dd>` : ""}
+        <dt>Usuário</dt><dd>${esc(p.user || "—")}</dd>
+        <dt>Desde</dt><dd>${p.started ? new Date(p.started * 1000).toLocaleString("pt-BR") : "—"}</dd>
+        <dt>Rede</dt><dd>${p.net.length ? esc(p.net.join(", ")) : p.net_count ? `${p.net_count} conexões locais` : "nenhuma conexão"}${p.listen.length ? `<br>Escutando em ${esc(p.listen.slice(0, 5).join(", "))}` : ""}</dd>
+      </dl>
+    </div>
+    <div class="card"><h3>Por que esta pontuação</h3>
+      ${p.reasons.length ? `<ul class="reasons">${p.reasons.map(([t, n]) => `<li class="${n < 0 ? "minus" : ""}"><span>${esc(t)}</span><b>${n > 0 ? "+" + n : n < 0 ? n : ""}</b></li>`).join("")}</ul>` : '<p class="sub">Nenhuma regra apontou nada neste processo.</p>'}
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-ai-proc="${p.pid}">${ic("ai")}Analisar com IA</button>
+      ${p.exe ? `<button class="btn" data-loc="${esc(p.exe)}">${ic("folder")}Abrir local</button><button class="btn" data-vt="${esc(p.exe)}">VirusTotal</button>` : ""}
+      ${canAct ? `<button class="btn danger" data-kill="${p.pid}">${ic("stop")}Encerrar</button>` : ""}
+      ${canAct && p.score >= 15 ? `<button class="btn danger" data-quar="${esc(p.exe)}">${ic("box")}Quarentena</button>` : ""}
+      ${p.exe && p.score > 0 && !p.trusted ? `<button class="btn" data-trust="${esc(p.exe)}">${ic("check")}Isso é normal</button>` : ""}
+    </div>
+  </aside>`;
+}
+
+V.startup = () => {
+  const d = st.data;
+  const rows = d.startup.filter(i => (!st.startupHideWin || !i.windows) && (!st.startupOnlyNew || i.new))
+    .sort((a, b) => (b.new - a.new) || (["none", "invalid"].includes(b.sig) - ["none", "invalid"].includes(a.sig)) || a.kind_label.localeCompare(b.kind_label) || a.name.localeCompare(b.name));
+  const sigP = i => ["file", "catalog", "package"].includes(i.sig) ? `<span class="pill ok">${esc(i.signer || "Assinado")}</span>` : i.sig === "none" ? '<span class="pill warn">Sem assinatura</span>' : i.sig === "invalid" ? '<span class="pill bad">Inválida</span>' : '<span class="pill mute">Arquivo não encontrado</span>';
+  return `<div class="vhead"><div><h2>Inicialização</h2><p class="sub">Tudo que abre sozinho com o Windows: chaves Run, pasta Inicializar, serviços automáticos e tarefas agendadas. Itens novos são comparados com a primeira lista feita.</p></div>
+    <button class="btn" data-act="startup-refresh">${ic("refresh")}Atualizar</button></div>
+  <div class="toolbar">
+    <button class="chip" data-suw="1" aria-pressed="${st.startupHideWin}">Ocultar itens do Windows (${d.startup.filter(i => i.windows).length})</button>
+    <button class="chip" data-sun="1" aria-pressed="${st.startupOnlyNew}">Só os novos (${d.startup.filter(i => i.new).length})</button>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Nome</th><th>Tipo</th><th>O que executa</th><th>Assinatura</th><th>Visto desde</th><th>Ativo</th></tr></thead>
+    <tbody>${rows.map((i, n) => `<tr>
+      <td><b style="font-weight:600">${esc(i.name)}</b> ${i.new ? '<span class="pill warn">Novo</span>' : ""}</td><td>${esc(i.kind_label)}</td>
+      <td class="mono clip" style="max-width:380px" title="${esc(i.command)}">${esc(i.command)}</td><td>${sigP(i)}</td><td>${ago(i.first_seen)}</td>
+      <td><label class="toggle" title="${st.data.admin ? "" : "Precisa de administrador"}"><input id="su-${n}" type="checkbox" data-sukey="${esc(i.key)}" ${i.enabled ? "checked" : ""} ${st.data.admin ? "" : "disabled"} aria-label="Ativar ${esc(i.name)}"><i></i></label></td></tr>`).join("")
+      || '<tr><td colspan="6" class="muted">' + (d.startup.length ? "Nada neste filtro." : "Lendo a inicialização…") + "</td></tr>"}</tbody></table></div>
+  <p class="sub">Desativar não apaga nada: o SmartGuardian guarda a entrada original e ela volta igual ao reativar.</p>`;
+};
+
+V.alerts = () => {
+  const d = st.data, groups = [];
+  for (const a of d.alerts) { const k = dayLabel(a.ts); let g = groups.find(x => x.k === k); if (!g) groups.push(g = { k, items: [] }); g.items.push(a); }
+  const STP = { open: '<span class="pill bad">Aberto</span>', learning: '<span class="pill mute" title="Registrado no aprendizado, sem aviso">Aprendizado</span>', dismissed: '<span class="pill mute">Ciente</span>', normal: '<span class="pill ok">Normal</span>' };
+  return `<div class="vhead"><div><h2>Alertas</h2><p class="sub">Clique em um alerta para ir até o item. "Isso é normal" coloca o item na lista de confiança e conta como alarme falso da regra.</p></div>
+    <div class="btn-row">${d.summary.open ? '<button class="btn" data-act="ack-all">Marcar todos como ciente</button>' : ""}
+      <button class="btn" data-pause="${d.summary.paused_until ? 0 : 60}">${ic("pause")}${d.summary.paused_until ? "Retomar avisos" : "Pausar 1 hora"}</button>
+      <button class="btn" data-ai-alerts="1">${ic("ai")}Resumir com IA</button></div></div>
+  ${groups.map(g => `<div class="card"><h3>${esc(g.k)}</h3><div class="list">${g.items.map(a => `
+    <div class="row"><span class="sev ${a.sev}"></span><div class="grow link" data-alert-go="${a.id}" style="cursor:pointer"><b>${esc(a.title)}</b><span style="white-space:normal">${esc(a.detail)}</span></div>
+      ${STP[a.status] || ""}<span class="muted num" style="font-size:12px">${hm(a.ts)}</span>
+      ${a.status === "open" || a.status === "learning" ? `<span class="btn-row"><button class="btn small" data-ack="${a.id}">Ciente</button><button class="btn small" data-normal="${a.id}">Isso é normal</button></span>` : ""}
+    </div>`).join("")}</div></div>`).join("") || '<div class="card"><div class="empty">Nenhum alerta ainda. Quando algo fugir do normal, aparece aqui.</div></div>'}`;
+};
+
+V.ai = () => {
+  const cfg = st.data.ai, S = st.aiStatus;
+  if (!cfg.enabled) return `<div class="vhead"><div><h2>Assistente IA</h2><p class="sub">Usa um modelo no LM Studio, neste PC. Nada é enviado para a internet.</p></div></div>
+    <div class="card"><h3>O assistente está desligado</h3><p class="sub" style="margin-bottom:12px">Ele responde perguntas sobre a rede, os processos e os alertas, e explica por que algo foi marcado. Precisa do LM Studio aberto, com um modelo carregado e o servidor local ligado (aba Developer → Start Server).</p>
+    <button class="btn primary" data-act="ai-on">Ativar o assistente</button></div>`;
+  const model = S && (cfg.model || S.models[0]);
+  const status = !S ? '<span class="pill mute">Conferindo o LM Studio…</span>'
+    : S.reachable ? `<span class="pill ok" title="LM Studio em ${esc(cfg.url)}">${model ? "Conectado · " + esc(model) : "Conectado, sem modelo carregado"}</span>`
+    : `<span class="pill bad" title="Abra o LM Studio e ligue o servidor local em ${esc(cfg.url)} (Developer → Start Server)">LM Studio não respondeu</span>`;
+  const day = ts => new Date(ts * 1000).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + hm(ts);
+  const cur = st.chats.find(c => c.id === st.chatId);
+  return `<div class="chat">
+    <div class="vhead"><div style="min-width:0"><h2>Assistente IA</h2><div class="ai-meta">${status}<button class="icon-btn" data-act="ai-status" title="Conferir o LM Studio de novo" aria-label="Conferir o LM Studio de novo">${ic("refresh")}</button></div>
+        <div class="chat-title">${cur ? `Conversa: <b>${esc(cur.title)}</b>` : "Conversa nova"}</div></div>
+      <div class="btn-row">
+        <div class="hist"><button class="btn" data-act="hist" aria-expanded="${!!st.histOpen}">Conversas${st.chats.length ? ` (${st.chats.length})` : ""} ▾</button>
+          ${st.histOpen ? `<div class="hist-pop" role="menu">${st.chats.map(c => `<div class="c ${c.id === st.chatId ? "on" : ""}"><button data-chat="${c.id}"><span>${esc(c.title)}</span><small>${day(c.ts)} · ${c.n} mensage${c.n === 1 ? "m" : "ns"}</small></button><button class="del" data-chatdel="${c.id}" title="Apagar conversa" aria-label="Apagar conversa">${ic("trash")}</button></div>`).join("") || '<div class="empty">Nenhuma conversa salva ainda.</div>'}</div>` : ""}
+        </div>
+        <button class="btn" data-act="ai-new">${ic("edit")}Nova conversa</button>
+        <button class="btn" data-act="report-ai">Relatório do dia</button>
+      </div></div>
+    <div class="msgs" id="msgs">${st.chat.length ? st.chat.map(m => m.role === "user" ? `<div class="msg me">${esc(m.content)}</div>`
+      : `<div class="msg ai ${m.err ? "err" : ""}"><div class="who">${ic("ai")}SmartGuardian IA</div>${md(m.content)}</div>`).join("")
+      : '<div class="empty">Pergunte algo sobre o PC. A cada pergunta o assistente recebe um resumo atual: processos com pontuação, conexões, portas abertas, aparelhos na rede, inicialização e alertas.</div>'}
+      ${st.aiBusy ? '<div class="msg ai"><div class="who">' + ic("ai") + 'SmartGuardian IA</div><span class="dots">Pensando</span></div>' : ""}</div>
+    <div style="display:grid;gap:8px">
+      <div class="toolbar">${["Tem algo estranho rodando no PC?", "Analise os processos sem assinatura", "O que mudou na inicialização?", "Explique as portas abertas", "Quem são os aparelhos na minha rede?"].map(q => `<button class="chip" data-ask="${esc(q)}" ${st.aiBusy ? "disabled" : ""}>${esc(q)}</button>`).join("")}</div>
+      <form class="composer" id="ask"><input id="askq" type="text" placeholder="Pergunte sobre a rede, os processos ou os alertas" aria-label="Pergunta" ${st.aiBusy ? "disabled" : ""}><button class="btn primary" aria-label="Enviar" ${st.aiBusy ? "disabled" : ""}>${ic("send")}</button></form>
+    </div></div>`;
+};
+
+V.settings = () => {
+  const s = st.data.settings, d = st.data;
+  const tg = (id, on, extra = "") => `<label class="toggle"><input id="${id}" type="checkbox" ${on ? "checked" : ""} ${extra}><i></i></label>`;
+  const row = (b, sp, ctl) => `<div class="set"><div class="grow"><b>${b}</b>${sp ? `<span>${sp}</span>` : ""}</div>${ctl}</div>`;
+  const sel = (id, opts, v) => `<select id="${id}">${opts.map(([val, label]) => `<option value="${val}" ${String(val) === String(v) ? "selected" : ""}>${label}</option>`).join("")}</select>`;
+  const RL = { fake_system_name: "Nome do Windows fora do lugar (forte)", bad_port: "Porta de invasão (forte)", temp_dir: "Pasta temporária", invalid_signature: "Assinatura quebrada",
+    encoded_command: "Comando codificado", office_spawns_shell: "Office abrindo terminal", unsigned: "Sem assinatura", user_dir: "Pasta do usuário", downloads_dir: "Pasta Downloads",
+    wrong_parent: "Processo pai errado", unsigned_internet: "Sem assinatura na internet", listen_all: "Porta aberta para a rede", new_exe: "Programa novo", unsigned_protected: "Sem assinatura em pasta protegida" };
+  return `<div class="vhead"><div><h2>Configurações</h2><p class="sub">Salvas em C:\\SmartGuardian\\settings.json. Pesos das regras em rules.json (as regras comuns valem no máximo 25 pontos).</p></div>
+    <button class="btn" data-folder="root">${ic("folder")}Abrir pasta do programa</button></div>
+  <div class="set-group"><h4>Geral</h4>
+    ${row("Iniciar com o Windows", "Começa só com o ícone na bandeja, já como administrador (tarefa agendada)", tg("s-startup", d.startup_enabled))}
+    ${row("Fechar ou minimizar a janela mantém o programa na bandeja", "Para encerrar, use Sair no menu do ícone", tg("s-close", s.close_to_tray))}
+  </div>
+  <div class="set-group"><h4>Monitoramento</h4>
+    ${row("Atualizar processos e conexões a cada", "", sel("s-int", [[2, "2 s"], [5, "5 s"], [10, "10 s"], [30, "30 s"]], s.interval))}
+    ${row("Escanear a rede local a cada", "Ping e tabela ARP; não abre portas nos aparelhos", sel("s-lan", [[60, "1 min"], [300, "5 min"], [900, "15 min"], [0, "Só manualmente"]], s.lan_interval))}
+    ${row("Mostrar o IP público", "Consulta api.ipify.org a cada minuto", tg("s-pub", s.public_ip))}
+    ${row("Guardar histórico de alertas por", "", sel("s-hist", [[7, "7 dias"], [30, "30 dias"], [90, "90 dias"]], s.history_days))}
+  </div>
+  <div class="set-group"><h4>Alertas</h4>
+    ${row("Período de aprendizado", d.summary.learning_left > 0 ? `Faltam ${fmtN(d.summary.learning_left)} dias · neste período só as regras fortes avisam` : "Terminado: tudo que for novo pode gerar aviso", sel("s-learn", [[0, "Desligado"], [3, "3 dias"], [7, "7 dias"], [14, "14 dias"]], s.learning_days))}
+    ${row("Avisar a partir da pontuação", "Abaixo disso fica só na lista de processos", sel("s-thr", [[30, "30 (atenção)"], [45, "45"], [60, "60 (alto)"]], s.alert_threshold))}
+    ${row("Processo suspeito", "", tg("s-n-process", s.notify.process))}
+    ${row("Dispositivo novo na rede", "", tg("s-n-new_device", s.notify.new_device))}
+    ${row("Mudança na inicialização, serviços ou tarefas", "", tg("s-n-startup", s.notify.startup))}
+    ${row("Detecção do Windows Defender", "", tg("s-n-defender", s.notify.defender))}
+    ${row("Uso de CPU acima de 90 % por 2 minutos", "", tg("s-n-high_cpu", s.notify.high_cpu))}
+  </div>
+  <div class="set-group"><h4>IA local (LM Studio)</h4>
+    ${row("Ativar o assistente", "", tg("s-ai", s.ai.enabled))}
+    ${row("Endereço do servidor", "", `<input type="text" id="s-ai-url" value="${esc(s.ai.url)}">`)}
+    ${row("Modelo", "Vazio = o primeiro modelo carregado no LM Studio", `<input type="text" id="s-ai-model" value="${esc(s.ai.model)}" placeholder="automático">`)}
+  </div>
+  <div class="set-group"><h4>Serviços externos (opcional)</h4>
+    ${row("Chave da API do VirusTotal", "Envia só o hash do arquivo, nunca o arquivo. Grátis em virustotal.com", `<input type="password" id="s-vt" value="${esc(s.vt_key)}" placeholder="Não configurada">`)}
+  </div>
+  <div class="set-group"><h4>Lista de confiança (${d.trust.length})</h4>
+    ${d.trust.length ? d.trust.map(t => row(esc(t.label), "Desde " + new Date(t.ts * 1000).toLocaleDateString("pt-BR") + (t.key.includes("|") && /\|[0-9a-f]{64}$/.test(t.key) ? " · por conteúdo (hash)" : " · pela editora"), `<button class="btn small" data-untrust="${esc(t.key)}">Remover</button>`)).join("") : row("Nada na lista", "Use \"Isso é normal\" em um processo ou alerta", "")}
+  </div>
+  <div class="set-group"><h4>Como as regras estão indo</h4>
+    <div class="tbl-wrap"><table><thead><tr><th>Regra</th><th class="r">Peso</th><th class="r">Alertas</th><th class="r">Marcados como normal</th></tr></thead><tbody>
+    ${Object.entries(d.weights).map(([k, w]) => { const r = d.stats.find(x => x.rule === k) || { alerts: 0, false_pos: 0 }; return `<tr><td>${RL[k] || k}</td><td class="r num">${w}</td><td class="r num">${r.alerts}</td><td class="r num">${r.false_pos ? `<b style="color:var(--warn)">${r.false_pos}</b>` : 0}</td></tr>`; }).join("")}
+    </tbody></table></div>
+  </div>
+  <div class="btn-row"><button class="btn" data-folder="reports">Relatórios</button><button class="btn" data-folder="exports">Exportações</button><button class="btn" data-folder="quarantine">Quarentena</button><button class="btn" data-act="report">Gerar relatório agora</button></div>`;
+};
+
+/* ---------------- IA ---------------- */
+const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*-] /gm, "• ").replace(/`([^`]+)`/g, '<span class="mono">$1</span>');
+async function aiStatus() { try { st.aiStatus = await call("ai_status"); } catch (e) { st.aiStatus = { reachable: false, models: [] }; } if (st.view === "ai") render(); }
+async function loadChats() {
+  try {
+    st.chats = (await call("chat_list")).chats;
+    if (st.chatId && !st.chats.some(c => c.id === st.chatId)) st.chatId = null;
+    if (st.chatId) { const r = await call("chat_get", st.chatId); st.chat = r.msgs; if (r.pending && !st.aiBusy) waitChat(st.chatId); }
+    else if (!st.aiBusy) st.chat = [];
+  } catch (e) {}
+  if (st.view === "ai") render();
+}
+function openChat(id) { if (st.aiBusy) return toast("Espere a resposta terminar"); st.chatId = id; try { localStorage.setItem("sg.chat", id || ""); } catch (e) {} return loadChats(); }
+async function waitChat(chatId, job) {
+  // a resposta é gravada no banco pelo Python; aqui só esperamos e recarregamos a conversa
+  st.aiBusy = true; if (st.view === "ai") render();
+  try {
+    for (let i = 0; i < 600; i++) {
+      await new Promise(res => setTimeout(res, 1000));
+      if (job) { if ((await window.pywebview.api.ai_result(job)).done) break; }
+      else if (!(await window.pywebview.api.chat_get(chatId)).pending) break;
+    }
+  } finally { st.aiBusy = false; await loadChats(); }
+}
+async function ask(q, pid = null) {
+  if (st.aiBusy || !q.trim()) return;
+  st.chat.push({ role: "user", content: q.trim() });
+  st.aiBusy = true; render();
+  let r;
+  try { r = await call("ai_ask", st.chatId, q.trim(), pid); }
+  catch (e) { st.aiBusy = false; return loadChats(); }
+  st.chatId = r.chat_id;
+  try { localStorage.setItem("sg.chat", r.chat_id); } catch (e) {}
+  await waitChat(r.chat_id, r.job);
+}
+async function goAsk(q, pid) {
+  st.view = "ai";
+  try { localStorage.setItem("sg.view", "ai"); } catch (e) {}
+  await load(true);
+  aiStatus();
+  if (!st.data.ai || !st.data.ai.enabled) return toast("Ative o assistente primeiro", "Clique em Ativar o assistente.");
+  if (st.aiBusy) return toast("Espere a resposta atual terminar");
+  st.chatId = null; st.chat = [];  // análise pedida de outra tela começa uma conversa nova
+  ask(q, pid);
+}
+
+/* ---------------- eventos ---------------- */
+async function saveSetting(id, el) {
+  const v = el.type === "checkbox" ? el.checked : el.value.trim();  // liga/desliga dá true/false; texto vem sem espaços nas pontas
+  const n = x => Number(x);
+  const map = {
+    "s-close": { close_to_tray: v }, "s-int": { interval: n(v) }, "s-lan": { lan_interval: n(v) }, "s-pub": { public_ip: v },
+    "s-hist": { history_days: n(v) }, "s-learn": { learning_days: n(v) }, "s-thr": { alert_threshold: n(v) },
+    "s-ai": { ai: { enabled: v } }, "s-ai-url": { ai: { url: v } }, "s-ai-model": { ai: { model: v } }, "s-vt": { vt_key: v },
+  };
+  if (id.startsWith("s-n-")) map[id] = { notify: { [id.slice(4)]: v } };
+  if (id === "s-startup") { await call("set_startup", v); toast(v ? "Vai iniciar com o Windows" : "Não inicia mais com o Windows"); return; }
+  if (!map[id]) return;
+  await call("save_settings", map[id]);
+  toast("Salvo");
+  if (id === "s-learn") { await load(true); }
+}
+
+document.addEventListener("change", async e => {
+  const el = e.target;
+  if (el.dataset.sukey) {
+    const on = el.checked;
+    try { await call("set_startup_item", el.dataset.sukey, on); toast(on ? "Reativado" : "Desativado", on ? "" : "A entrada original ficou guardada; reative quando quiser."); }
+    catch (err) { el.checked = !on; }
+    return load(true);
+  }
+  if (el.id && el.id.startsWith("s-")) saveSetting(el.id, el).catch(() => load(true));
+});
+async function finishEdit(save) {
+  const i = $("#dev-edit");
+  if (!i || !st.editing) return;
+  const mac = st.editing, name = i.value.trim();
+  st.editing = null;
+  if (save) { try { await call("update_device", mac, name, true); toast(name ? "Nome salvo" : "Nome apagado"); } catch (e) {} }
+  load(true);
+}
+function closeHist() { st.histOpen = false; const p = $(".hist-pop"); if (p) p.remove(); const b = $('[data-act="hist"]'); if (b) b.setAttribute("aria-expanded", "false"); }
+document.addEventListener("mousedown", e => { if (st.histOpen && !e.target.closest(".hist") && $("#modal").hidden) closeHist(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && st.histOpen) closeHist(); });
+document.addEventListener("keydown", e => { if (e.target.id === "dev-edit") { if (e.key === "Enter") finishEdit(true); if (e.key === "Escape") finishEdit(false); } });
+document.addEventListener("focusout", e => { if (e.target.id === "dev-edit") finishEdit(true); });
+document.addEventListener("input", e => { if (e.target.id === "pq") { st.procQuery = e.target.value; render(); } });
+document.addEventListener("submit", e => { if (e.target.id === "ask") { e.preventDefault(); const q = $("#askq").value; ask(q); } });
+
+document.addEventListener("click", async e => {
+  const el = e.target.closest("button, [data-go], [data-pick], [data-proc], [data-alert-go]");
+  if (!el || el.disabled) return;
+  const D = el.dataset;
+  try {
+    if (D.go) return go(D.go);
+    if (D.proc) { st.procFilter = "all"; st.procQuery = ""; return go("procs", +D.proc); }
+    if (D.pick) { st.pick = +D.pick; return render(); }
+    if (D.alertGo) {
+      const a = (st.data.alerts || []).find(x => x.id === +D.alertGo); if (!a) return;
+      const t = a.target || {};
+      if (t.view === "procs") { st.procFilter = "all"; st.procQuery = ""; return go("procs", t.pid); }
+      if (t.view === "lan") { st.lanFilter = "all"; return go("lan"); }
+      if (t.view === "startup") { st.startupHideWin = false; st.startupOnlyNew = false; return go("startup"); }
+      return go(t.view || "alerts");
+    }
+    if (D.lanf) { st.lanFilter = D.lanf; return render(); }
+    if (D.connf) { st.connFilter = D.connf; return render(); }
+    if (D.pf) { st.procFilter = D.pf; return render(); }
+    if (D.suw) { st.startupHideWin = !st.startupHideWin; return render(); }
+    if (D.sun) { st.startupOnlyNew = !st.startupOnlyNew; return render(); }
+    if (D.known) { await call("update_device", D.known, null, true); toast("Marcado como conhecido"); return load(true); }
+    if (D.edit) { st.editing = D.edit; render(); const i = $("#dev-edit"); if (i) { i.focus(); i.select(); } return; }
+    if (D.chat) { st.histOpen = false; return openChat(+D.chat); }
+    if (D.chatdel) {
+      const c = st.chats.find(x => x.id === +D.chatdel);
+      closeHist();
+      if (!await modal({ title: "Apagar esta conversa?", text: esc(c ? c.title : ""), ok: "Apagar", danger: true })) return;
+      await call("chat_delete", +D.chatdel); if (st.chatId === +D.chatdel) st.chatId = null; return loadChats();
+    }
+    if (D.trust) { await call("trust_exe", D.trust); toast("Na lista de confiança", "Se o programa for assinado, continua confiável quando atualizar; se não for, só enquanto o arquivo não mudar."); return load(true); }
+    if (D.untrust) { await call("untrust", D.untrust); toast("Removido da lista de confiança"); return load(true); }
+    if (D.loc) return call("open_location", D.loc);
+    if (D.folder) return call("open_folder", D.folder);
+    if (D.vt) {
+      toast("Consultando o VirusTotal…");
+      const r = await call("vt_lookup", D.vt);
+      if (!r.found) return toast("O VirusTotal não conhece este arquivo", "Ninguém enviou este arquivo ainda. Não quer dizer que é perigoso nem que é seguro.");
+      return toast(r.malicious ? `${r.malicious} antivírus marcam como malicioso` : "Nenhum antivírus marca como malicioso",
+        `${r.malicious} malicioso · ${r.suspicious} suspeito · ${r.harmless + r.undetected} limpo. SHA-256 ${r.sha256.slice(0, 16)}…`, r.malicious > 0);
+    }
+    if (D.kill) {
+      const p = st.data.procs.find(x => x.pid === +D.kill);
+      if (!await modal({ title: `Encerrar ${p ? p.name : "processo"}?`, text: `PID ${esc(D.kill)}${p ? " · " + esc(p.exe) : ""}. Os processos abertos por ele também serão encerrados. O que não estiver salvo nesse programa será perdido.`, ok: "Encerrar", danger: true })) return;
+      const r = await call("kill", +D.kill); toast(`${r.name} encerrado`); return load(true);
+    }
+    if (D.quar) {
+      if (!await modal({ title: "Mover para a quarentena?", text: `Encerra todos os processos de <span class="mono">${esc(D.quar)}</span> e move o arquivo para C:\\SmartGuardian\\quarentena, de onde ele não roda. Dá para devolver manualmente depois.`, ok: "Mover", danger: true })) return;
+      const r = await call("quarantine", D.quar); toast("Arquivo na quarentena", r.path); return load(true);
+    }
+    if (D.ack) { await call("resolve_alert", +D.ack, false); return load(true); }
+    if (D.normal) { await call("resolve_alert", +D.normal, true); toast("Marcado como normal", "Não vai avisar de novo sobre este item."); return load(true); }
+    if (D.pause !== undefined) { await call("pause", +D.pause); toast(+D.pause ? "Avisos pausados por 1 hora" : "Avisos retomados"); return load(true); }
+    if (D.ask) return ask(D.ask);
+    if (D.aiProc) { const p = st.data.procs.find(x => x.pid === +D.aiProc); return goAsk(`Analise o processo ${p.name} (PID ${p.pid}): é seguro? O que eu devo fazer?`, p.pid); }
+    if (D.aiAlerts) return goAsk("Resuma os alertas recentes: o que é grave, o que é normal e o que eu devo fazer.");
+    switch (D.act) {
+      case "check": { const r = await call("check_now"); toast("Verificação completa", `${r.procs} processos e ${r.conns} conexões conferidos.`); return load(true); }
+      case "scan": await call("scan_lan"); toast("Varredura iniciada"); setTimeout(() => load(true), 600); return;
+      case "export": { const r = await call("export_conns"); toast("Conexões exportadas", r.path); return; }
+      case "startup-refresh": await call("refresh_startup"); toast("Atualizando a lista", "Leva alguns segundos."); setTimeout(() => load(true), 4000); return;
+      case "ack-all": await call("resolve_all"); return load(true);
+      case "ai-on": await call("save_settings", { ai: { enabled: true } }); await load(true); return aiStatus();
+      case "ai-status": st.aiStatus = null; render(); return aiStatus();
+      case "ai-new": st.histOpen = false; return openChat(null);
+      case "hist": st.histOpen = !st.histOpen; return render();
+      case "report": case "report-ai": await call("report", D.act === "report-ai"); return toast("Gerando relatório", (D.act === "report-ai" ? "Com o resumo da IA leva até um minuto. " : "") + "Ele abre sozinho no navegador quando ficar pronto.");
+    }
+  } catch (err) { console.error(err); }
+});
+
+window.app = {
+  onShow(view) { st.visible = true; if (view) st.view = view; load(true); if (st.view === "ai") { aiStatus(); loadChats(); } },
+  onHide() { st.visible = false; },
+};
+const _go = go;
+go = (view, pick) => { st.editing = null; _go(view, pick); if (view === "ai") { aiStatus(); loadChats(); } };
+
+async function boot() {
+  try { const a = await window.pywebview.api.accent(); if (a.accent) { document.documentElement.style.setProperty("--acc-l", a.accent.light); document.documentElement.style.setProperty("--acc-d", a.accent.dark); } } catch (e) {}
+  await load(true);
+  if (st.view === "ai") { aiStatus(); loadChats(); }
+  setInterval(load, 2000);
+}
+window.addEventListener("pywebviewready", boot);
+</script>
+</body>
+</html>

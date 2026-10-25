@@ -1,0 +1,833 @@
+<title>SmartGuardian de Rede</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: página de protótipo com a janela do app (navegação lateral do Windows 11) ou o painel da bandeja,
+   e abaixo o plano em fases. Tokens herdados do painel do SmartDevices. */
+:root {
+  --accent: #005fb8; --accent-ink: #ffffff;
+  --bg: #f3f3f3; --bg-2: #ebebeb; --page: #e4e6ea; --ink: #1b1b1b; --ink-2: #5f5f5f; --ink-3: #8a8a8a;
+  --tile: #fbfbfb; --tile-hover: #f6f6f6; --tile-press: #f0f0f0; --card: #ffffff;
+  --line: rgba(0,0,0,.08); --line-2: rgba(0,0,0,.14); --hover: rgba(0,0,0,.04); --press: rgba(0,0,0,.025);
+  --good: #0f7b0f; --good-bg: #dff6dd; --warn: #9d5d00; --warn-bg: #fff4ce; --bad: #c42b1c; --bad-bg: #fde7e9;
+  --info-bg: #e6f0fa; --shadow: 0 8px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.08);
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent: #4cc2ff; --accent-ink: #000000;
+    --bg: #202020; --bg-2: #1b1b1b; --page: #141517; --ink: #ffffff; --ink-2: #c5c5c5; --ink-3: #8f8f8f;
+    --tile: #2d2d2d; --tile-hover: #323232; --tile-press: #272727; --card: #2b2b2b;
+    --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.14); --hover: rgba(255,255,255,.06); --press: rgba(255,255,255,.04);
+    --good: #6ccb5f; --good-bg: #2a3a28; --warn: #fce100; --warn-bg: #433519; --bad: #ff99a4; --bad-bg: #442726;
+    --info-bg: #1f3446; --shadow: 0 8px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --accent: #4cc2ff; --accent-ink: #000000;
+  --bg: #202020; --bg-2: #1b1b1b; --page: #141517; --ink: #ffffff; --ink-2: #c5c5c5; --ink-3: #8f8f8f;
+  --tile: #2d2d2d; --tile-hover: #323232; --tile-press: #272727; --card: #2b2b2b;
+  --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.14); --hover: rgba(255,255,255,.06); --press: rgba(255,255,255,.04);
+  --good: #6ccb5f; --good-bg: #2a3a28; --warn: #fce100; --warn-bg: #433519; --bad: #ff99a4; --bad-bg: #442726;
+  --info-bg: #1f3446; --shadow: 0 8px 32px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font: 14px/1.45 var(--font); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.wrap { max-width: 1200px; margin: 0 auto; display: grid; gap: 20px; }
+
+/* ---------- barra do protótipo ---------- */
+.proto { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; justify-content: space-between; }
+.proto h1 { font: 600 22px/1.2 var(--display); margin: 0; text-wrap: balance; }
+.proto p { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; }
+.seg { display: inline-flex; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 5px 14px; border-radius: 4px; font-size: 13px; cursor: pointer; }
+.seg button:hover { background: var(--hover); }
+.seg button[aria-pressed="true"] { background: var(--card); box-shadow: 0 0 0 1px var(--line); font-weight: 600; }
+
+/* ---------- janela ---------- */
+.win { background: var(--bg); border-radius: 8px; box-shadow: var(--shadow); border: 1px solid var(--line-2); overflow: hidden;
+  display: grid; grid-template-rows: 40px minmax(0, 1fr); height: 760px; max-height: calc(100vh - 40px); min-height: 560px; }
+.titlebar { display: flex; align-items: center; gap: 10px; padding-left: 14px; background: var(--bg-2); user-select: none; }
+.titlebar .t { font-size: 12px; flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.titlebar .t span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titlebar .ctrl { display: flex; height: 100%; }
+.titlebar .ctrl button { width: 46px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; }
+.titlebar .ctrl button:hover { background: var(--hover); }
+.titlebar .ctrl button.x:hover { background: #c42b1c; color: #fff; }
+.logo { width: 18px; height: 18px; color: var(--accent); }
+.app { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; }
+nav { padding: 6px 6px 10px; display: flex; flex-direction: column; gap: 2px; background: var(--bg-2); border-right: 1px solid var(--line); overflow-y: auto; }
+nav button { display: flex; align-items: center; gap: 12px; border: 0; background: transparent; text-align: left; padding: 8px 10px; border-radius: 4px; position: relative; font-size: 13.5px; cursor: pointer; }
+nav button:hover { background: var(--hover); }
+nav button[aria-current="page"] { background: var(--hover); font-weight: 600; }
+nav button[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--accent); }
+nav .badge { margin-left: auto; font-size: 11px; font-weight: 600; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center; background: var(--bad); color: #fff; }
+nav .sep { height: 1px; background: var(--line); margin: 6px 8px; }
+nav .grow { flex: 1; }
+nav .phase { margin-left: auto; font-size: 10.5px; color: var(--ink-3); letter-spacing: .02em; }
+main { overflow-y: auto; padding: 22px 28px 28px; min-width: 0; }
+main h2 { font: 600 24px/1.2 var(--display); margin: 0 0 4px; }
+.sub { color: var(--ink-2); font-size: 13px; margin: 0; }
+.view { display: grid; gap: 16px; align-content: start; }
+.vhead { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+
+/* ---------- peças ---------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+.card h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.card h3 small { font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.grid { display: grid; gap: 12px; }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: 2fr 1fr; }
+.btn { border: 1px solid var(--line-2); background: var(--tile); border-radius: 4px; padding: 5px 12px; font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.btn:hover { background: var(--tile-hover); }
+.btn:active { background: var(--tile-press); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 90%, var(--bg)); }
+.btn.danger { color: var(--bad); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { color: var(--good); background: var(--good-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.bad { color: var(--bad); background: var(--bad-bg); }
+.pill.info { color: var(--accent); background: var(--info-bg); }
+.pill.mute { color: var(--ink-2); background: var(--hover); }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--ink-2); }
+.num { font-variant-numeric: tabular-nums; }
+
+.status { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; padding: 18px 20px; }
+.status .shield { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; background: var(--warn-bg); color: var(--warn); flex: none; }
+.status .shield svg { width: 28px; height: 28px; }
+.status .txt { flex: 1; min-width: 200px; }
+.status .txt b { font: 600 18px/1.25 var(--display); display: block; }
+
+.metric { display: grid; gap: 4px; }
+.metric .lbl { font-size: 12px; color: var(--ink-2); display: flex; justify-content: space-between; }
+.metric .val { font: 600 22px/1.15 var(--display); font-variant-numeric: tabular-nums; }
+.metric .val small { font: 400 12px var(--font); color: var(--ink-2); }
+.spark { width: 100%; height: 36px; display: block; }
+.spark .area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
+.spark .ln { fill: none; stroke: var(--accent); stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+.spark .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.spark .end { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+
+.list { display: grid; }
+.row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+.row:first-child { border-top: 0; }
+.row .grow { flex: 1; min-width: 0; }
+.row .grow b { font-weight: 600; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .grow span { font-size: 12px; color: var(--ink-2); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ico { width: 32px; height: 32px; border-radius: 6px; background: var(--hover); display: grid; place-items: center; flex: none; color: var(--ink-2); }
+.sev { width: 4px; align-self: stretch; border-radius: 2px; flex: none; }
+.sev.bad { background: var(--bad); } .sev.warn { background: var(--warn); } .sev.info { background: var(--accent); } .sev.ok { background: var(--good); }
+
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; font-size: 12px; color: var(--ink-2); padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--tile); position: sticky; top: 0; }
+td { padding: 8px 12px; border-top: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+tr:first-child td { border-top: 0; }
+tbody tr { cursor: default; }
+tbody tr:hover td { background: var(--hover); }
+tbody tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+td.r, th.r { text-align: right; }
+.score { display: inline-flex; align-items: center; gap: 8px; }
+.score .bar { width: 56px; height: 4px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.score .bar i { display: block; height: 100%; border-radius: 2px; }
+
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.search { display: flex; align-items: center; gap: 8px; background: var(--tile); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 10px; min-width: 0; flex: 1 1 220px; max-width: 340px; }
+.search input { border: 0; background: transparent; padding: 6px 0; outline: none; width: 100%; font-size: 13px; }
+.chip { border: 1px solid var(--line-2); background: var(--tile); border-radius: 14px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+.info-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.info-strip div { background: var(--card); padding: 10px 14px; min-width: 0; }
+.info-strip span { display: block; font-size: 11.5px; color: var(--ink-2); }
+.info-strip b { font-weight: 600; font-size: 13.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.detail { display: grid; gap: 12px; position: sticky; top: 0; }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px 10px; font-size: 12.5px; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.reasons { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.reasons li { display: flex; gap: 10px; justify-content: space-between; }
+.reasons li b { font-variant-numeric: tabular-nums; color: var(--bad); flex: none; }
+.reasons li.minus b { color: var(--good); }
+
+.progress { height: 3px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s linear; }
+
+/* ---------- IA ---------- */
+.chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; min-height: 520px; gap: 12px; }
+.msgs { overflow-y: auto; display: grid; gap: 12px; align-content: start; padding-right: 4px; }
+.msg { max-width: 78%; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; }
+.msg.me { justify-self: end; background: var(--accent); color: var(--accent-ink); }
+.msg.ai { background: var(--card); border: 1px solid var(--line); }
+.msg.ai p { margin: 0 0 8px; } .msg.ai p:last-child { margin: 0; }
+.msg.ai ul { margin: 0 0 8px; padding-left: 18px; }
+.msg .who { font-size: 11.5px; color: var(--ink-2); margin-bottom: 4px; display: flex; gap: 6px; align-items: center; }
+.composer { display: flex; gap: 8px; align-items: center; background: var(--card); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 6px 6px 12px; }
+.composer input { flex: 1; border: 0; background: transparent; outline: none; padding: 6px 0; min-width: 0; }
+
+/* ---------- configurações ---------- */
+.set-group { display: grid; gap: 2px; }
+.set-group > h4 { font-size: 13px; font-weight: 600; margin: 8px 0 6px; }
+.set { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; flex-wrap: wrap; }
+.set .grow { flex: 1; min-width: 180px; }
+.set .grow b { font-weight: 400; display: block; font-size: 13.5px; }
+.set .grow span { font-size: 12px; color: var(--ink-2); }
+.set input[type=text], .set select { background: var(--tile); border: 1px solid var(--line-2); border-bottom-color: var(--ink-2); border-radius: 4px; padding: 5px 8px; font-size: 13px; min-width: 0; width: 220px; max-width: 100%; }
+.toggle { position: relative; width: 40px; height: 20px; flex: none; }
+.toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.toggle i { position: absolute; inset: 0; border-radius: 10px; border: 1px solid var(--ink-2); transition: background .15s; }
+.toggle i::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--ink-2); top: 3px; left: 4px; transition: left .15s; }
+.toggle input:checked + i { background: var(--accent); border-color: var(--accent); }
+.toggle input:checked + i::after { left: 22px; background: var(--accent-ink); }
+.toggle input:focus-visible + i { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ---------- bandeja ---------- */
+.desk { border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); border: 1px solid var(--line-2);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 35%, var(--page)), var(--page) 70%);
+  display: grid; grid-template-rows: minmax(0, 1fr) 48px; height: 760px; max-height: calc(100vh - 40px); min-height: 600px; }
+.desk-area { display: flex; justify-content: flex-end; align-items: flex-end; padding: 12px; gap: 16px; min-height: 0; }
+.flyout { width: 360px; max-width: 100%; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.flyout .fb { padding: 16px; display: grid; gap: 12px; }
+.flyout .fhead { display: flex; align-items: center; gap: 10px; }
+.flyout .fhead b { flex: 1; }
+.mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mini .card { padding: 10px 12px; }
+.mini .metric .val { font-size: 18px; }
+.fstat { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 6px; background: var(--warn-bg); color: var(--ink); }
+.fstat svg { color: var(--warn); width: 24px; height: 24px; }
+.fstat b { display: block; font-size: 13.5px; }
+.fstat span { font-size: 12px; color: var(--ink-2); }
+.ffoot { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 6px 12px; background: var(--bg-2); border-top: 1px solid var(--line); }
+.link-btn { border: 0; background: transparent; padding: 6px 8px; border-radius: 4px; display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.link-btn:hover { background: var(--hover); }
+.ctx { width: 230px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; font-size: 13px; align-self: flex-end; }
+.ctx div { padding: 7px 12px; border-radius: 4px; display: flex; justify-content: space-between; }
+.ctx div:hover { background: var(--hover); }
+.ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+.ctx-label { font-size: 11.5px; color: var(--ink-2); text-align: center; margin-top: 6px; }
+.taskbar { background: color-mix(in srgb, var(--bg-2) 92%, transparent); border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; gap: 6px; font-size: 12px; }
+.tray-ico { width: 32px; height: 32px; border-radius: 4px; display: grid; place-items: center; position: relative; background: var(--hover); cursor: pointer; border: 0; }
+.tray-ico .dotb { position: absolute; right: 5px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--bg-2); }
+.clock { text-align: right; line-height: 1.25; padding: 0 6px; }
+
+.toast { position: fixed; right: max(20px, env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 340px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: 14px 16px; display: grid; gap: 4px; z-index: 20; font-size: 13px; }
+.toast b { font-size: 13.5px; }
+
+/* ---------- plano ---------- */
+.plan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plan .card h3 { justify-content: flex-start; }
+.plan ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.plan .tag { font-size: 11.5px; color: var(--ink-2); font-weight: 400; margin-left: auto; }
+.section-title { font: 600 18px/1.2 var(--display); margin: 8px 0 0; }
+.arch { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.arch pre { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--ink); }
+
+@media (max-width: 1000px) {
+  .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split, .g3 { grid-template-columns: minmax(0, 1fr); }
+  .detail { position: static; }
+  .plan { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .win, .desk { height: auto; max-height: none; }
+  .app { grid-template-columns: minmax(0, 1fr); }
+  nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 6px; }
+  nav button { flex: none; padding: 8px 10px; }
+  nav button span.lb { display: none; }
+  nav button[aria-current="page"] span.lb { display: inline; }
+  nav .sep, nav .grow, nav .phase { display: none; }
+  nav button[aria-current="page"]::before { left: 10px; right: 10px; top: auto; bottom: 0; width: auto; height: 3px; }
+  main { padding: 16px; }
+  .g2 { grid-template-columns: minmax(0, 1fr); }
+  .msg { max-width: 92%; }
+  .desk-area { flex-direction: column; align-items: stretch; }
+  .ctx { align-self: stretch; width: auto; }
+  .titlebar .ctrl button { width: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="proto">
+    <div>
+      <h1>SmartGuardian · protótipo da interface</h1>
+      <p>Clique nos itens do menu, nas linhas das tabelas e nos botões da barra de título. Todos os números e nomes são de exemplo.</p>
+    </div>
+    <div class="seg" role="group" aria-label="Tela">
+      <button id="mode-win" aria-pressed="true">Janela principal</button>
+      <button id="mode-tray" aria-pressed="false">Bandeja</button>
+    </div>
+  </header>
+
+  <section class="win" id="win" aria-label="Janela do SmartGuardian">
+    <div class="titlebar">
+      <div class="t"><svg class="i logo" viewBox="0 0 16 16"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/><path d="m5.6 8 1.7 1.7L10.6 6.4"/></svg><span>SmartGuardian</span><span class="pill info">Administrador</span></div>
+      <div class="ctrl">
+        <button id="tb-min" title="Minimizar para a bandeja" aria-label="Minimizar"><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8h9"/></svg></button>
+        <button title="Maximizar" aria-label="Maximizar"><svg class="i" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg></button>
+        <button id="tb-close" class="x" title="Fechar (continua na bandeja)" aria-label="Fechar"><svg class="i" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+      </div>
+    </div>
+    <div class="app">
+      <nav id="nav" aria-label="Seções"></nav>
+      <main id="main"></main>
+    </div>
+  </section>
+
+  <section class="desk" id="desk" hidden aria-label="Painel da bandeja">
+    <div class="desk-area">
+      <div>
+        <div class="ctx" aria-label="Menu do botão direito">
+          <div>Abrir SmartGuardian</div>
+          <div>Verificar agora</div>
+          <div>Escanear a rede</div>
+          <hr>
+          <div>Pausar alertas por 1 hora</div>
+          <div>Iniciar com o Windows <span>✓</span></div>
+          <hr>
+          <div>Sair</div>
+        </div>
+        <div class="ctx-label">Botão direito no ícone</div>
+      </div>
+      <div class="flyout" id="flyout"></div>
+    </div>
+    <div class="taskbar">
+      <span class="muted">PT · BR</span>
+      <button class="tray-ico" id="tray-ico" title="SmartGuardian · 2 avisos · 9 dispositivos na rede" aria-label="Ícone do SmartGuardian na bandeja">
+        <svg class="i" viewBox="0 0 16 16"><path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/></svg><span class="dotb"></span>
+      </button>
+      <div class="clock num">14:32<br>25/10/2026</div>
+    </div>
+  </section>
+
+  <h2 class="section-title">Como ele seria construído</h2>
+  <div class="plan">
+    <div class="card">
+      <h3>Fase 1 · Monitor <span class="tag">começa aqui</span></h3>
+      <ul>
+        <li>App da bandeja igual ao SmartDevices: pywebview + pystray, abre, minimiza, inicia com o Windows</li>
+        <li>Pede para rodar como administrador (UAC) ao abrir, para ver processos do sistema, encerrar processos e mexer na inicialização</li>
+        <li>CPU, memória, disco e rede com psutil, a cada 2 s</li>
+        <li>Processos: caminho, pai, usuário, assinatura digital, hash SHA-256</li>
+        <li>Conexões por processo e portas abertas</li>
+        <li>Varredura da rede: ARP + ping, fabricante pelo MAC, nome por DNS/mDNS/NetBIOS</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Fase 2 · Regras e alertas</h3>
+      <ul>
+        <li>Pontuação de risco por regras simples e editáveis (arquivo <span class="mono">rules.json</span>)</li>
+        <li>Notificação do Windows para: dispositivo novo, processo sem assinatura, porta incomum</li>
+        <li>O que mudou: inicialização, serviços, tarefas agendadas</li>
+        <li>Lista de confiança e histórico em SQLite (30 dias)</li>
+        <li>Consulta opcional do hash no VirusTotal (com chave sua)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Fase 3 · IA local</h3>
+      <ul>
+        <li>LM Studio pela API compatível com OpenAI (<span class="mono">localhost:1234/v1</span>)</li>
+        <li>Botão Analisar com IA em processos, conexões e alertas</li>
+        <li>Chat sobre os logs e o estado atual do PC</li>
+        <li>Relatório diário em HTML</li>
+        <li>Só metadados vão para o modelo; nada sai do PC</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="justify-content:flex-start">Como evitar falso positivo</h3>
+    <div class="grid g2" style="font-size:13px">
+      <ul style="margin:0;padding-left:18px;display:grid;gap:6px">
+        <li><b>Nenhuma regra sozinha gera alerta.</b> Cada regra vale no máximo 25 pontos e o alerta começa em 30, então são precisos pelo menos dois sinais diferentes.</li>
+        <li><b>Assinatura válida anula as regras de local.</b> Discord e Python instalados em AppData são normais quando assinados pela editora.</li>
+        <li><b>Assinatura conferida do jeito certo:</b> arquivo assinado, catálogo do Windows (System32) e pacote da Microsoft Store. No seu PC, Widgets e Feed do Iniciar não têm assinatura no .exe, mas o pacote é assinado pela Microsoft.</li>
+        <li><b>Período de aprendizado de 7 dias:</b> o que já roda no PC vira o normal. Depois disso só alerta o que é novo ou mudou.</li>
+      </ul>
+      <ul style="margin:0;padding-left:18px;display:grid;gap:6px">
+        <li><b>Regras fortes alertam sempre,</b> mesmo no aprendizado: nome falso de processo do Windows e porta de invasão conhecida.</li>
+        <li><b>Confiança por editora:</b> quando um programa assinado se atualiza, a confiança continua. Já um arquivo sem assinatura que muda de hash perde a confiança.</li>
+        <li><b>Botão Isso é normal</b> em todo alerta: cria a exceção e conta quantos alarmes falsos cada regra gerou.</li>
+        <li><b>Segunda opinião:</b> o que o Windows Defender já detectou e, se você quiser, o hash no VirusTotal.</li>
+        <li><b>Teste no seu PC antes de ligar os alertas:</b> alguns dias só registrando. A meta é zero alertas em programas que você reconhece.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="arch"><pre>
+ Interfaces     tray.py + ui/index.html (janela e painel da bandeja)
+                        |
+ Núcleo         core/guard.py   agenda os coletores, guarda o estado, dispara alertas
+                /        |          |            \
+ Coletores   system.py  procs.py  conns.py   lan.py (ARP, ping, mDNS, OUI)
+                \        |          |            /
+ Análise        core/rules.py (pontuação)   core/ai.py (LM Studio, fase 3)
+                        |
+ Dados          smartguardian.db (SQLite)   settings.json   rules.json   trusted.json   smartguardian.log</pre></div>
+</div>
+
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const I = {
+  home: '<path d="M2.5 7 8 2.5 13.5 7v6.5h-4v-4h-3v4h-4z"/>',
+  net: '<rect x="6" y="1.5" width="4" height="3.5" rx=".6"/><rect x="1.5" y="11" width="4" height="3.5" rx=".6"/><rect x="10.5" y="11" width="4" height="3.5" rx=".6"/><path d="M8 5v3M3.5 11V8h9v3"/>',
+  conn: '<path d="M6.5 9.5 9.5 6.5M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1"/>',
+  proc: '<rect x="4" y="4" width="8" height="8" rx="1"/><path d="M6.5 1.5v2.5M9.5 1.5v2.5M6.5 12v2.5M9.5 12v2.5M1.5 6.5H4M1.5 9.5H4M12 6.5h2.5M12 9.5h2.5"/>',
+  apps: '<rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><path d="M11.5 9.5v4M9.5 11.5h4"/>',
+  bell: '<path d="M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3zM6.5 14h3"/>',
+  ai: '<path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6z"/>',
+  gear: '<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',
+  shield: '<path d="M8 1.5 2.5 3.5v4c0 3.3 2.3 5.9 5.5 7 3.2-1.1 5.5-3.7 5.5-7v-4z"/><path d="M8 5v3.5M8 10.6v.1"/>',
+  pc: '<rect x="1.5" y="2.5" width="13" height="8.5" rx="1"/><path d="M5.5 14h5M8 11v3"/>',
+  phone: '<rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/>',
+  tv: '<rect x="1.5" y="3" width="13" height="8.5" rx="1"/><path d="M5 14h6"/>',
+  router: '<rect x="1.5" y="9" width="13" height="4.5" rx="1"/><path d="M4 11.2h.1M6.5 11.2h.1M11 9V5M5.5 4.5a3.5 3.5 0 0 1 5 0M3.8 2.8a6 6 0 0 1 8.4 0"/>',
+  chip: '<rect x="4" y="4" width="8" height="8" rx="1"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2"/>',
+  printer: '<path d="M4.5 6V2h7v4M4.5 11.5h-3V6h13v5.5h-3"/><rect x="4.5" y="9.5" width="7" height="4.5"/>',
+  speaker: '<circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="2.5"/>',
+  search: '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/>',
+  refresh: '<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3"/>',
+  send: '<path d="M2 8 14 2.5 10.5 14 8 9z"/>',
+  folder: '<path d="M1.5 4h5l1.5 1.5h6.5v8h-13z"/>',
+  stop: '<rect x="3.5" y="3.5" width="9" height="9" rx="1"/>',
+  check: '<path d="m3 8.5 3 3 7-7"/>',
+};
+const ic = (k, cls = "i") => `<svg class="${cls}" viewBox="0 0 16 16">${I[k]}</svg>`;
+
+/* ---------------- dados de exemplo ---------------- */
+const NAV = [
+  ["overview", "Visão geral", "home"],
+  ["lan", "Rede local", "net"],
+  ["conns", "Conexões", "conn"],
+  ["procs", "Processos", "proc", 1],
+  ["startup", "Inicialização", "apps", 1],
+  ["alerts", "Alertas", "bell"],
+  ["sep"],
+  ["ai", "Assistente IA", "ai", 0, "fase 3"],
+  ["grow"],
+  ["settings", "Configurações", "gear"],
+];
+
+const LAN = [
+  { name: "Roteador", ip: "192.168.0.1", mac: "50:C7:BF:2A:11:04", vendor: "TP-Link", kind: "router", seen: "há 3 meses", st: "known", lat: 2 },
+  { name: "Este PC (MEU-PC)", ip: "192.168.0.105", mac: "D8:BB:C1:7E:42:9A", vendor: "Intel", kind: "pc", seen: "há 3 meses", st: "self", lat: 0 },
+  { name: "Galaxy S24", ip: "192.168.0.112", mac: "A2:4F:9C:31:D0:7B", vendor: "MAC aleatório", kind: "phone", seen: "há 2 meses", st: "known", lat: 38 },
+  { name: "TV da sala", ip: "192.168.0.120", mac: "78:5D:C8:0A:B3:21", vendor: "LG Electronics", kind: "tv", seen: "há 3 meses", st: "known", lat: 6 },
+  { name: "Echo Dot", ip: "192.168.0.131", mac: "44:00:49:9E:1C:55", vendor: "Amazon", kind: "speaker", seen: "há 1 mês", st: "known", lat: 12 },
+  { name: "Impressora EPSON L3250", ip: "192.168.0.140", mac: "38:1A:52:66:E0:13", vendor: "Seiko Epson", kind: "printer", seen: "há 3 meses", st: "known", lat: 4 },
+  { name: "notebook-trabalho", ip: "192.168.0.108", mac: "F4:6B:8C:22:9D:E1", vendor: "Dell", kind: "pc", seen: "há 6 dias", st: "known", lat: 3, off: true },
+  { name: "Sem nome", ip: "192.168.0.157", mac: "24:0A:C4:8F:3B:70", vendor: "Espressif (ESP32/ESP8266)", kind: "chip", seen: "há 22 min", st: "new", lat: 9 },
+  { name: "Sem nome", ip: "192.168.0.163", mac: "6E:12:A9:C4:05:BE", vendor: "MAC aleatório", kind: "phone", seen: "há 2 dias", st: "unknown", lat: 41 },
+];
+
+const PROCS = [
+  { name: "svchost.exe", pid: 9184, cpu: 2.1, ram: 48, user: "Usuario", sig: "none", path: "C:\\Users\\Usuario\\AppData\\Local\\Temp\\svchost.exe", parent: "explorer.exe (5320)", cmd: "svchost.exe -k netsvcs -s update", started: "hoje 13:58", hash: "9f2c…a71e", conns: "185.220.101.47:4444 (Alemanha)", score: 92,
+    why: [["Nome de processo do sistema fora de C:\\Windows\\System32", 40], ["Roda a partir de uma pasta temporária", 25], ["Sem assinatura digital", 20], ["Conexão com porta 4444, comum em ferramentas de acesso remoto", 15], ["Iniciado pelo explorer, e não pelo services.exe", 10], ["Visto pela primeira vez hoje", 5], ["Limite", -23]] },
+  { name: "updater_x64.exe", pid: 7720, cpu: 0.4, ram: 22, user: "Usuario", sig: "none", path: "C:\\Users\\Usuario\\AppData\\Roaming\\FreeConvert\\updater_x64.exe", parent: "taskeng (tarefa agendada)", cmd: "updater_x64.exe /silent /check", started: "hoje 08:01", hash: "41be…0c93", conns: "cdn-upd.freeconv[.]net:443", score: 55,
+    why: [["Sem assinatura digital", 20], ["Executável em AppData\\Roaming", 15], ["Iniciado por tarefa agendada criada ontem", 15], ["Domínio registrado há menos de 30 dias", 10], ["Conexão em porta 443 padrão", -5]] },
+  { name: "node.exe", pid: 15012, cpu: 0.9, ram: 186, user: "Usuario", sig: "ok", signer: "OpenJS Foundation", path: "C:\\Program Files\\nodejs\\node.exe", parent: "WindowsTerminal.exe", cmd: "node server.js", started: "hoje 11:20", hash: "c0d1…77a2", conns: "Escutando em 0.0.0.0:3000 (toda a rede)", score: 25,
+    why: [["Porta aberta para toda a rede local", 20], ["Assinado por editora conhecida", -10], ["Iniciado por você no terminal", 15]] },
+  { name: "LM Studio.exe", pid: 4410, cpu: 1.2, ram: 1840, user: "Usuario", sig: "ok", signer: "Element Labs Inc.", path: "C:\\Users\\Usuario\\AppData\\Local\\Programs\\LM Studio\\LM Studio.exe", parent: "explorer.exe (5320)", cmd: "", started: "hoje 09:12", hash: "—", conns: "Escutando em 127.0.0.1:1234", score: 5, why: [["Na lista de confiança", 0]] },
+  { name: "chrome.exe", pid: 6224, cpu: 3.8, ram: 2210, user: "Usuario", sig: "ok", signer: "Google LLC", path: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", parent: "explorer.exe (5320)", cmd: "", started: "hoje 08:40", hash: "—", conns: "38 conexões HTTPS", score: 0, why: [["Assinado e na lista de confiança", 0]] },
+  { name: "Code.exe", pid: 11880, cpu: 1.6, ram: 980, user: "Usuario", sig: "ok", signer: "Microsoft Corporation", path: "C:\\Users\\Usuario\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", parent: "explorer.exe (5320)", cmd: "", started: "hoje 10:05", hash: "—", conns: "4 conexões HTTPS", score: 0, why: [["Assinado pela Microsoft", 0]] },
+  { name: "MsMpEng.exe", pid: 3912, cpu: 0.7, ram: 312, user: "SYSTEM", sig: "ok", signer: "Microsoft Corporation", path: "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18\\MsMpEng.exe", parent: "services.exe (1020)", cmd: "", started: "hoje 08:00", hash: "—", conns: "—", score: 0, why: [["Componente do Windows Defender", 0]] },
+  { name: "svchost.exe", pid: 1468, cpu: 0.2, ram: 64, user: "SYSTEM", sig: "ok", signer: "Microsoft Windows", path: "C:\\Windows\\System32\\svchost.exe", parent: "services.exe (1020)", cmd: "svchost.exe -k netsvcs -p", started: "hoje 08:00", hash: "—", conns: "2 conexões", score: 0, why: [["Local e pai corretos para este nome", 0]] },
+  { name: "pythonw.exe", pid: 8840, cpu: 0.3, ram: 74, user: "Usuario", sig: "ok", signer: "Python Software Foundation", path: "C:\\SmartDevices\\.venv\\Scripts\\pythonw.exe", parent: "wscript.exe", cmd: "pythonw tray.py --tray", started: "hoje 08:01", hash: "—", conns: "Bluetooth", score: 5, why: [["SmartDevices, na lista de confiança", 0]] },
+  { name: "Discord.exe", pid: 12940, cpu: 0.5, ram: 410, user: "Usuario", sig: "ok", signer: "Discord Inc.", path: "C:\\Users\\Usuario\\AppData\\Local\\Discord\\app-1.0.9180\\Discord.exe", parent: "explorer.exe (5320)", cmd: "", started: "hoje 08:02", hash: "—", conns: "6 conexões", score: 0, why: [["Executável em AppData\\Local (comum em apps como Discord)", 15], ["Assinatura válida da editora anula a regra de local", -15]] },
+];
+
+const CONNS = [
+  { p: "svchost.exe", pid: 9184, host: "(sem nome DNS)", ip: "185.220.101.47", port: 4444, cc: "Alemanha", st: "Estabelecida", tx: "1,8 MB", rx: "92 KB", score: 92 },
+  { p: "updater_x64.exe", pid: 7720, host: "cdn-upd.freeconv.net", ip: "104.21.66.13", port: 443, cc: "EUA (Cloudflare)", st: "Estabelecida", tx: "4 KB", rx: "310 KB", score: 55 },
+  { p: "chrome.exe", pid: 6224, host: "www.google.com", ip: "142.250.79.36", port: 443, cc: "EUA", st: "Estabelecida", tx: "220 KB", rx: "14,2 MB", score: 0 },
+  { p: "Discord.exe", pid: 12940, host: "gateway.discord.gg", ip: "162.159.135.234", port: 443, cc: "EUA (Cloudflare)", st: "Estabelecida", tx: "38 KB", rx: "1,1 MB", score: 0 },
+  { p: "Code.exe", pid: 11880, host: "marketplace.visualstudio.com", ip: "13.107.42.18", port: 443, cc: "EUA", st: "Estabelecida", tx: "12 KB", rx: "640 KB", score: 0 },
+  { p: "svchost.exe", pid: 1468, host: "time.windows.com", ip: "168.61.215.74", port: 123, cc: "EUA", st: "UDP", tx: "1 KB", rx: "1 KB", score: 0 },
+  { p: "MsMpEng.exe", pid: 3912, host: "wdcp.microsoft.com", ip: "20.42.65.85", port: 443, cc: "EUA", st: "Tempo de espera", tx: "6 KB", rx: "18 KB", score: 0 },
+];
+const LISTEN = [
+  { p: "node.exe", addr: "0.0.0.0:3000", note: "Aberto para toda a rede local", sev: "warn" },
+  { p: "LM Studio.exe", addr: "127.0.0.1:1234", note: "Só este PC", sev: "ok" },
+  { p: "svchost.exe (RpcSs)", addr: "0.0.0.0:135", note: "Serviço do Windows", sev: "ok" },
+  { p: "System", addr: "0.0.0.0:445", note: "Compartilhamento de arquivos (SMB)", sev: "info" },
+  { p: "spoolsv.exe", addr: "127.0.0.1:49668", note: "Serviço do Windows", sev: "ok" },
+];
+
+const STARTUP = [
+  { name: "FreeConvert Updater", kind: "Tarefa agendada", path: "C:\\Users\\Usuario\\AppData\\Roaming\\FreeConvert\\updater_x64.exe /silent", when: "ontem 21:44", sig: "none", ch: "new" },
+  { name: "WinUpdateSvc", kind: "Chave Run do registro", path: "C:\\Users\\Usuario\\AppData\\Local\\Temp\\svchost.exe -k netsvcs", when: "hoje 13:57", sig: "none", ch: "new" },
+  { name: "SmartDevices", kind: "Pasta Inicializar", path: "pythonw.exe C:\\SmartDevices\\tray.py --tray", when: "há 2 dias", sig: "ok", ch: "trusted" },
+  { name: "Discord", kind: "Chave Run do registro", path: "C:\\Users\\Usuario\\AppData\\Local\\Discord\\Update.exe --processStart Discord.exe", when: "há 3 meses", sig: "ok", ch: "same" },
+  { name: "SecurityHealth", kind: "Chave Run do registro", path: "C:\\Windows\\System32\\SecurityHealthSystray.exe", when: "há 3 meses", sig: "ok", ch: "same" },
+  { name: "AMD Noise Suppression", kind: "Serviço", path: "C:\\Program Files\\AMD\\CNext\\amdnoisesuppression.exe", when: "há 11 dias", sig: "ok", ch: "same" },
+];
+
+const ALERTS = [
+  { day: "Hoje", items: [
+    { t: "13:58", sev: "bad", title: "Processo com nome do sistema em pasta temporária", sub: "svchost.exe (PID 9184) em AppData\\Local\\Temp, conectado a 185.220.101.47:4444", go: "procs", pick: 9184 },
+    { t: "13:57", sev: "bad", title: "Nova entrada na inicialização", sub: "WinUpdateSvc aponta para o mesmo svchost.exe da pasta Temp", go: "startup" },
+    { t: "14:10", sev: "warn", title: "Dispositivo novo na rede", sub: "192.168.0.157 · Espressif (ESP32/ESP8266), sem nome", go: "lan" },
+    { t: "11:21", sev: "info", title: "Porta aberta para toda a rede", sub: "node.exe escutando em 0.0.0.0:3000", go: "conns" },
+    { t: "08:01", sev: "warn", title: "Programa sem assinatura começou a usar a internet", sub: "updater_x64.exe → cdn-upd.freeconv.net", go: "procs", pick: 7720 },
+  ]},
+  { day: "Ontem", items: [
+    { t: "21:44", sev: "warn", title: "Nova tarefa agendada", sub: "FreeConvert Updater, executa a cada 4 h", go: "startup" },
+    { t: "19:02", sev: "ok", title: "Relatório do dia gerado", sub: "Nenhum item de risco alto", go: "ai" },
+    { t: "09:15", sev: "info", title: "Dispositivo voltou à rede", sub: "notebook-trabalho (192.168.0.108)", go: "lan" },
+  ]},
+];
+
+/* séries para os gráficos pequenos: 60 amostras de 2 s */
+function series(base, amp, n = 60, seed = 1) {
+  let s = seed, v = base; const out = [];
+  for (let i = 0; i < n; i++) { s = (s * 9301 + 49297) % 233280; v += (s / 233280 - .5) * amp; v = Math.max(base - amp * 2, Math.min(base + amp * 2, v)); out.push(Math.max(1, Math.min(99, v))); }
+  return out;
+}
+const S = { cpu: series(22, 8, 60, 3), mem: series(36, 1.2, 60, 7), disk: series(61, .2, 60, 5), net: series(30, 14, 60, 11) };
+
+function spark(data, max = 100) {
+  const w = 120, h = 36, n = data.length;
+  const x = i => (i / (n - 1)) * w, y = v => h - 2 - (v / max) * (h - 6);
+  const pts = data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const last = data[n - 1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Últimos 2 minutos">
+    <line class="grid" x1="0" x2="${w}" y1="${y(max / 2)}" y2="${y(max / 2)}"/>
+    <polygon class="area" points="0,${h} ${pts} ${w},${h}"/>
+    <polyline class="ln" points="${pts}"/>
+  </svg>`;
+}
+
+const sevOf = sc => sc >= 60 ? ["bad", "Alto"] : sc >= 30 ? ["warn", "Atenção"] : sc >= 15 ? ["info", "Baixo"] : ["ok", "Normal"];
+const scoreCell = sc => { const [c, l] = sevOf(sc); return `<span class="score"><span class="bar"><i style="width:${Math.max(sc, 3)}%;background:var(--${c === "info" ? "accent" : c === "ok" ? "good" : c})"></i></span><span class="pill ${c}">${l} · ${sc}</span></span>`; };
+const sigCell = p => p.sig === "ok" ? `<span class="pill ok">${esc(p.signer || "Assinado")}</span>` : `<span class="pill bad">Sem assinatura</span>`;
+
+/* ---------------- estado ---------------- */
+const st = { view: "overview", pick: 9184, procFilter: "all", procQuery: "", lanFilter: "all", scanning: false, chat: null };
+try { const v = localStorage.getItem("guardiao.view"); if (v) st.view = v; } catch (e) {}
+
+function go(view, pick) {
+  st.view = view; if (pick) st.pick = pick;
+  try { localStorage.setItem("guardiao.view", view); } catch (e) {}
+  render();
+  $("#main").scrollTop = 0;
+}
+
+function renderNav() {
+  $("#nav").innerHTML = NAV.map(([k, l, i, badge, phase]) => {
+    if (k === "sep") return '<div class="sep"></div>';
+    if (k === "grow") return '<div class="grow"></div>';
+    return `<button data-go="${k}" ${st.view === k ? 'aria-current="page"' : ""} title="${l}">${ic(i)}<span class="lb">${l}</span>${badge ? `<span class="badge">${badge}</span>` : ""}${phase ? `<span class="phase">${phase}</span>` : ""}</button>`;
+  }).join("");
+}
+
+/* ---------------- telas ---------------- */
+const V = {};
+
+V.overview = () => `
+  <div class="vhead"><div><h2>Visão geral</h2><p class="sub">MEU-PC · Windows 11 Pro · ligado há 6 h 32 min</p></div></div>
+  <div class="card status">
+    <div class="shield">${ic("shield")}</div>
+    <div class="txt"><b>2 itens pedem sua atenção</b><span class="muted">Um processo com nome do sistema rodando da pasta Temp e um dispositivo novo na rede. Última verificação há 12 s.</span></div>
+    <div class="btn-row"><button class="btn primary" data-go="alerts">Ver alertas</button><button class="btn" data-toast="Verificação completa: 214 processos, 61 conexões, 9 dispositivos.">${ic("refresh")}Verificar agora</button></div>
+  </div>
+  <div class="grid g4" id="metrics">${metrics()}</div>
+  <div class="grid g3">
+    <div class="card"><h3>Alertas recentes <button class="btn" data-go="alerts">Todos</button></h3><div class="list">
+      ${ALERTS[0].items.slice(0, 4).map(alertRow).join("")}
+    </div></div>
+    <div class="card"><h3>Na rede agora <small>9 dispositivos · 1 novo</small></h3><div class="list">
+      ${LAN.filter(d => !d.off).slice(0, 5).concat(LAN.filter(d => d.st === "new")).filter((d, i, a) => a.indexOf(d) === i).slice(-5).map(d => `
+        <div class="row"><div class="ico">${ic(d.kind)}</div><div class="grow"><b>${esc(d.name)}</b><span>${d.ip} · ${esc(d.vendor)}</span></div>${lanPill(d)}</div>`).join("")}
+    </div></div>
+  </div>
+  <div class="card"><h3>Mais memória agora <button class="btn" data-go="procs">Processos</button></h3>
+    <div class="list">${[...PROCS].sort((a, b) => b.ram - a.ram).slice(0, 4).map(p => `
+      <div class="row"><div class="ico">${ic("proc")}</div><div class="grow"><b>${esc(p.name)}</b><span>${esc(p.path)}</span></div><span class="num muted">${fmtRam(p.ram)}</span></div>`).join("")}</div>
+  </div>`;
+
+function metrics() {
+  const last = k => S[k][S[k].length - 1];
+  return `
+  <div class="card metric"><div class="lbl"><span>Processador</span><span>Ryzen 7 7700</span></div><div class="val">${last("cpu").toFixed(0)}<small> %</small></div>${spark(S.cpu)}</div>
+  <div class="card metric"><div class="lbl"><span>Memória</span><span>32 GB</span></div><div class="val">${(last("mem") * .32).toFixed(1)}<small> GB em uso · ${last("mem").toFixed(0)} %</small></div>${spark(S.mem)}</div>
+  <div class="card metric"><div class="lbl"><span>Disco C:</span><span>1 TB</span></div><div class="val">612<small> GB usados · 61 %</small></div>${spark(S.disk)}</div>
+  <div class="card metric"><div class="lbl"><span>Rede (Wi-Fi)</span><span>Casa_5G</span></div><div class="val">${(last("net") / 7).toFixed(1)}<small> Mb/s ↓ · 0,6 ↑</small></div>${spark(S.net)}</div>`;
+}
+const fmtRam = mb => mb >= 1000 ? (mb / 1024).toFixed(1).replace(".", ",") + " GB" : mb + " MB";
+const lanPill = d => d.st === "new" ? '<span class="pill warn">Novo</span>' : d.st === "unknown" ? '<span class="pill warn">Desconhecido</span>' : d.st === "self" ? '<span class="pill info">Este PC</span>' : d.off ? '<span class="pill mute">Fora da rede</span>' : '<span class="pill ok">Conhecido</span>';
+const alertRow = a => `<div class="row" data-go="${a.go}" ${a.pick ? `data-pick="${a.pick}"` : ""} style="cursor:pointer"><span class="sev ${a.sev}"></span><div class="grow"><b>${esc(a.title)}</b><span>${esc(a.sub)}</span></div><span class="muted num">${a.t}</span></div>`;
+
+V.lan = () => {
+  const rows = LAN.filter(d => st.lanFilter === "all" || (st.lanFilter === "attn" && (d.st === "new" || d.st === "unknown")));
+  return `
+  <div class="vhead"><div><h2>Rede local</h2><p class="sub">Faixa 192.168.0.0/24 · varredura automática a cada 5 min · última há 4 min</p></div>
+    <button class="btn primary" id="scan">${ic("refresh")}${st.scanning ? "Escaneando…" : "Escanear agora"}</button></div>
+  <div class="progress" ${st.scanning ? "" : "hidden"}><i id="scanbar"></i></div>
+  <div class="info-strip">
+    <div><span>Conexão</span><b>Wi-Fi · Casa_5G · 5 GHz</b></div>
+    <div><span>Este PC</span><b class="mono">192.168.0.105</b></div>
+    <div><span>Roteador</span><b class="mono">192.168.0.1 · 2 ms</b></div>
+    <div><span>DNS</span><b class="mono">1.1.1.1 · 8.8.8.8</b></div>
+    <div><span>IP público</span><b class="mono">189.45.xxx.xxx</b></div>
+    <div><span>Internet</span><b style="color:var(--good)">OK · 18 ms</b></div>
+  </div>
+  <div class="toolbar">
+    <button class="chip" data-lan="all" aria-pressed="${st.lanFilter === "all"}">Todos (9)</button>
+    <button class="chip" data-lan="attn" aria-pressed="${st.lanFilter === "attn"}">Novos e desconhecidos (2)</button>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Dispositivo</th><th>IP</th><th>MAC</th><th>Fabricante</th><th class="r">Resposta</th><th>Visto pela 1ª vez</th><th>Situação</th><th></th></tr></thead>
+    <tbody>${rows.map(d => `<tr>
+      <td><span style="display:inline-flex;gap:10px;align-items:center">${ic(d.kind)}<b style="font-weight:600">${esc(d.name)}</b></span></td>
+      <td class="mono">${d.ip}</td><td class="mono">${d.mac}</td><td>${esc(d.vendor)}</td>
+      <td class="r num">${d.off ? "—" : d.lat + " ms"}</td><td>${d.seen}</td><td>${lanPill(d)}</td>
+      <td>${d.st === "new" || d.st === "unknown" ? `<button class="btn" data-toast="${esc(d.ip)} marcado como conhecido. Dê um nome para ele em Configurações → Dispositivos.">${ic("check")}Conheço</button>` : ""}</td>
+    </tr>`).join("")}</tbody></table></div>
+  <p class="sub">Celulares com MAC aleatório aparecem como desconhecidos até você dar um nome. O SmartGuardian lembra pelo nome do host quando o MAC muda.</p>`;
+};
+
+V.conns = () => `
+  <div class="vhead"><div><h2>Conexões</h2><p class="sub">61 conexões ativas de 14 programas · atualiza a cada 5 s</p></div>
+    <div class="btn-row"><button class="btn" data-toast="Lista exportada para C:\\SmartGuardian\\exports\\conexoes-2026-10-25.csv">Exportar</button></div></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Programa</th><th>Destino</th><th>IP : porta</th><th>País</th><th>Estado</th><th class="r">Enviado</th><th class="r">Recebido</th><th>Risco</th></tr></thead>
+    <tbody>${CONNS.map(c => `<tr data-go="procs" data-pick="${c.pid}" style="cursor:pointer">
+      <td><b style="font-weight:600">${esc(c.p)}</b> <span class="muted num">${c.pid}</span></td><td>${esc(c.host)}</td>
+      <td class="mono">${c.ip}:${c.port}</td><td>${c.cc}</td><td>${c.st}</td><td class="r num">${c.tx}</td><td class="r num">${c.rx}</td><td>${scoreCell(c.score)}</td></tr>`).join("")}</tbody></table></div>
+  <div class="card"><h3>Portas abertas neste PC <small>quem pode se conectar ao seu computador</small></h3><div class="list">
+    ${LISTEN.map(l => `<div class="row"><span class="sev ${l.sev}"></span><div class="grow"><b class="mono">${l.addr}</b><span>${esc(l.p)}</span></div><span class="muted" style="font-size:12.5px">${l.note}</span></div>`).join("")}
+  </div></div>`;
+
+V.procs = () => {
+  const q = st.procQuery.toLowerCase();
+  const rows = PROCS.filter(p => (st.procFilter === "all" || p.score >= 30) && (!q || (p.name + p.path).toLowerCase().includes(q))).sort((a, b) => b.score - a.score);
+  const p = PROCS.find(x => x.pid === st.pick) || rows[0];
+  return `
+  <div class="vhead"><div><h2>Processos</h2><p class="sub">214 processos · 2 acima do limite de atenção (30)</p></div></div>
+  <div class="toolbar">
+    <label class="search">${ic("search")}<input id="pq" type="text" placeholder="Nome ou caminho" value="${esc(st.procQuery)}" aria-label="Procurar processo"></label>
+    <button class="chip" data-pf="all" aria-pressed="${st.procFilter === "all"}">Todos</button>
+    <button class="chip" data-pf="sus" aria-pressed="${st.procFilter === "sus"}">Só os que pedem atenção</button>
+  </div>
+  <div class="split">
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Nome</th><th class="r">PID</th><th class="r">CPU</th><th class="r">Memória</th><th>Assinatura</th><th>Risco</th></tr></thead>
+      <tbody>${rows.map(r => `<tr data-pick="${r.pid}" class="${p && r.pid === p.pid ? "sel" : ""}" style="cursor:pointer">
+        <td><b style="font-weight:600">${esc(r.name)}</b><div class="muted" style="font-size:11.5px;max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(r.path)}</div></td>
+        <td class="r num">${r.pid}</td><td class="r num">${r.cpu.toFixed(1)} %</td><td class="r num">${fmtRam(r.ram)}</td><td>${sigCell(r)}</td><td>${scoreCell(r.score)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nenhum processo com esse nome.</td></tr>'}</tbody></table></div>
+    ${p ? procDetail(p) : ""}
+  </div>`;
+};
+
+function procDetail(p) {
+  const [c, l] = sevOf(p.score);
+  const total = p.why.reduce((a, [, n]) => a + n, 0);
+  return `<aside class="detail">
+    <div class="card">
+      <h3><span>${esc(p.name)} <span class="muted num" style="font-weight:400">${p.pid}</span></span><span class="pill ${c}">${l} · ${p.score}</span></h3>
+      <dl class="kv">
+        <dt>Local</dt><dd class="mono">${esc(p.path)}</dd>
+        <dt>Assinatura</dt><dd>${sigCell(p)}</dd>
+        <dt>Iniciado por</dt><dd>${esc(p.parent)}</dd>
+        ${p.cmd ? `<dt>Comando</dt><dd class="mono">${esc(p.cmd)}</dd>` : ""}
+        <dt>Usuário</dt><dd>${p.user}</dd>
+        <dt>Desde</dt><dd>${p.started}</dd>
+        <dt>Rede</dt><dd>${esc(p.conns)}</dd>
+        <dt>SHA-256</dt><dd class="mono">${p.hash}</dd>
+      </dl>
+    </div>
+    <div class="card"><h3>Por que esta pontuação</h3>
+      <ul class="reasons">${p.why.map(([t, n]) => `<li class="${n < 0 ? "minus" : ""}"><span>${esc(t)}</span><b>${n > 0 ? "+" + n : n === 0 ? "" : n}</b></li>`).join("")}</ul>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" data-ai="${p.pid}">${ic("ai")}Analisar com IA</button>
+      <button class="btn" data-toast="Abriria o Explorador em ${esc(p.path.replace(/\\[^\\]+$/, ""))}">${ic("folder")}Abrir local</button>
+      <button class="btn" data-toast="Consulta do hash no VirusTotal (precisa de chave da API nas Configurações)">VirusTotal</button>
+      ${p.score >= 30 ? `<button class="btn danger" data-toast="Pediria confirmação e encerraria o PID ${p.pid}. Opção de mover o arquivo para a quarentena.">${ic("stop")}Encerrar</button>` : ""}
+      <button class="btn" data-toast="${esc(p.name)} neste local entrou na lista de confiança.">${ic("check")}Confiar</button>
+    </div>
+  </aside>`;
+}
+
+V.startup = () => `
+  <div class="vhead"><div><h2>Inicialização</h2><p class="sub">Tudo que abre sozinho com o Windows: chaves Run, pasta Inicializar, serviços e tarefas agendadas. Comparado com a foto de ontem.</p></div></div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Nome</th><th>Tipo</th><th>O que executa</th><th>Assinatura</th><th>Desde</th><th>Mudança</th><th>Ativo</th></tr></thead>
+    <tbody>${STARTUP.map((s, i) => `<tr>
+      <td><b style="font-weight:600">${esc(s.name)}</b></td><td>${s.kind}</td>
+      <td class="mono" style="max-width:340px;overflow:hidden;text-overflow:ellipsis">${esc(s.path)}</td>
+      <td>${s.sig === "ok" ? '<span class="pill ok">Assinado</span>' : '<span class="pill bad">Sem assinatura</span>'}</td><td>${s.when}</td>
+      <td>${s.ch === "new" ? '<span class="pill warn">Novo</span>' : s.ch === "trusted" ? '<span class="pill info">Confiável</span>' : '<span class="pill mute">Sem mudança</span>'}</td>
+      <td><label class="toggle"><input id="su-${i}" type="checkbox" ${s.ch === "new" && s.sig === "none" ? "" : "checked"} aria-label="Ativar ${esc(s.name)}"><i></i></label></td></tr>`).join("")}</tbody></table></div>
+  <p class="sub">Desativar aqui não apaga nada: o SmartGuardian guarda a entrada original e pode restaurá-la.</p>`;
+
+V.alerts = () => `
+  <div class="vhead"><div><h2>Alertas</h2><p class="sub">Clique em um alerta para ir até o item</p></div>
+    <div class="btn-row"><button class="btn" data-toast="Alertas pausados até 15:32">Pausar 1 hora</button><button class="btn" data-ai="day">${ic("ai")}Resumir com IA</button></div></div>
+  ${ALERTS.map(g => `<div class="card"><h3>${g.day}</h3><div class="list">${g.items.map(alertRow).join("")}</div></div>`).join("")}`;
+
+V.ai = () => {
+  if (!st.chat) st.chat = [
+    { me: true, t: "O svchost.exe na pasta Temp é perigoso?" },
+    { me: false, t: `<p>Provavelmente sim. O <b>svchost.exe</b> verdadeiro só roda de <span class="mono">C:\\Windows\\System32</span> e é iniciado pelo <b>services.exe</b>. Este está em <span class="mono">AppData\\Local\\Temp</span>, foi aberto pelo explorer, não tem assinatura e mantém conexão com <span class="mono">185.220.101.47:4444</span>.</p><ul><li>Esse IP aparece em listas de saída da rede Tor.</li><li>Ele também criou a entrada <b>WinUpdateSvc</b> na inicialização às 13:57, um minuto antes de rodar.</li></ul><p>Sugestão: encerrar o processo, desativar a entrada WinUpdateSvc, mover o arquivo para a quarentena e rodar uma verificação completa do Windows Defender.</p>` },
+  ];
+  return `<div class="chat">
+    <div class="vhead"><div><h2>Assistente IA</h2><p class="sub"><span class="pill ok">LM Studio conectado</span> &nbsp;localhost:1234 · qwen3-8b-instruct · os dados não saem do PC</p></div>
+      <div class="btn-row"><button class="btn" data-toast="Relatório salvo em C:\\SmartGuardian\\relatorios\\2026-10-25.html">Gerar relatório do dia</button></div></div>
+    <div class="msgs" id="msgs">${st.chat.map(m => m.me ? `<div class="msg me">${esc(m.t)}</div>` : `<div class="msg ai"><div class="who">${ic("ai")}SmartGuardian IA</div>${m.t}</div>`).join("")}</div>
+    <div style="display:grid;gap:8px">
+      <div class="toolbar">
+        ${["Analise os processos sem assinatura", "O que mudou desde ontem?", "Explique as portas abertas", "Quem é o 192.168.0.157?"].map(q => `<button class="chip" data-ask="${q}">${q}</button>`).join("")}
+      </div>
+      <form class="composer" id="ask"><input id="askq" type="text" placeholder="Pergunte sobre a rede, os processos ou os logs" aria-label="Pergunta"><button class="btn primary" aria-label="Enviar">${ic("send")}</button></form>
+    </div>
+  </div>`;
+};
+
+V.settings = () => {
+  const tg = (id, on) => `<label class="toggle"><input id="${id}" type="checkbox" ${on ? "checked" : ""}><i></i></label>`;
+  const s = (b, sp, ctl) => `<div class="set"><div class="grow"><b>${b}</b>${sp ? `<span>${sp}</span>` : ""}</div>${ctl}</div>`;
+  const sel = (id, opts, v) => `<select id="${id}">${opts.map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+  return `
+  <div class="vhead"><div><h2>Configurações</h2><p class="sub">Tudo fica em C:\\SmartGuardian\\settings.json; as regras de pontuação em rules.json</p></div></div>
+  <div class="set-group"><h4>Geral</h4>
+    ${s("Rodar como administrador", "Necessário para ver todos os processos e conexões, encerrar processos e desativar itens da inicialização. O Windows pergunta ao abrir; ao iniciar com o Windows usa uma tarefa agendada para não perguntar toda vez.", tg("s-admin", true))}
+    ${s("Iniciar com o Windows", "Começa só com o ícone na bandeja", tg("s-start", true))}
+    ${s("Fechar a janela mantém o SmartGuardian na bandeja", "Para encerrar, use Sair no menu do ícone", tg("s-close", true))}
+    ${s("Tema", "", sel("s-theme", ["Igual ao Windows", "Claro", "Escuro"], "Igual ao Windows"))}
+  </div>
+  <div class="set-group"><h4>Monitoramento</h4>
+    ${s("Atualizar processos e conexões a cada", "", sel("s-int", ["2 s", "5 s", "10 s", "30 s"], "5 s"))}
+    ${s("Escanear a rede local a cada", "Usa ARP e ping; não abre portas nos aparelhos", sel("s-lan", ["1 min", "5 min", "15 min", "Só manualmente"], "5 min"))}
+    ${s("Faixa da rede", "Detectada pela placa ativa", `<input type="text" id="s-range" value="192.168.0.0/24 (automático)">`)}
+    ${s("Guardar histórico por", "", sel("s-hist", ["7 dias", "30 dias", "90 dias"], "30 dias"))}
+  </div>
+  <div class="set-group"><h4>Alertas</h4>
+    ${s("Período de aprendizado", "Faltam 5 dias · neste período só alertam as regras fortes", sel("s-learn", ["Desligado", "3 dias", "7 dias", "14 dias"], "7 dias"))}
+    ${s("Editoras confiáveis", "Microsoft, Google, Mozilla, Valve, Discord, Python e mais 26 · editar lista", `<button class="btn" type="button">Editar</button>`)}
+    ${s("Exceções criadas por você", "4 itens marcados como Isso é normal", `<button class="btn" type="button">Ver</button>`)}
+    ${s("Avisar a partir da pontuação", "Abaixo disso fica só no histórico", sel("s-thr", ["30 (atenção)", "60 (alto)"], "30 (atenção)"))}
+    ${s("Dispositivo novo na rede", "", tg("s-a1", true))}
+    ${s("Programa sem assinatura acessando a internet", "", tg("s-a2", true))}
+    ${s("Mudança na inicialização, serviços ou tarefas", "", tg("s-a3", true))}
+    ${s("Uso de CPU acima de 90 % por mais de 2 min", "", tg("s-a4", false))}
+    ${s("Portas que sempre alertam", "", `<input type="text" id="s-ports" value="4444, 1337, 3389, 5900, 6667">`)}
+  </div>
+  <div class="set-group"><h4>IA local (LM Studio)</h4>
+    ${s("Ativar o assistente", "Fase 3 · pode ficar desligado", tg("s-ai", true))}
+    ${s("Endereço do servidor", "", `<input type="text" id="s-url" value="http://localhost:1234/v1">`)}
+    ${s("Modelo", "Lista os modelos carregados no LM Studio", sel("s-model", ["qwen3-8b-instruct", "llama-3.1-8b-instruct", "gemma-3-12b"], "qwen3-8b-instruct"))}
+    ${s("Analisar sozinho itens com pontuação alta", "Gera a explicação antes de você abrir o alerta", tg("s-auto", true))}
+  </div>
+  <div class="set-group"><h4>Serviços externos (opcional)</h4>
+    ${s("Chave da API do VirusTotal", "Envia só o hash do arquivo, nunca o arquivo", `<input type="text" id="s-vt" placeholder="Não configurada">`)}
+  </div>`;
+};
+
+/* ---------------- painel da bandeja ---------------- */
+function renderFlyout() {
+  const last = k => S[k][S[k].length - 1];
+  $("#flyout").innerHTML = `<div class="fb">
+    <div class="fhead"><svg class="i logo" viewBox="0 0 16 16">${I.shield}</svg><b>SmartGuardian</b><span class="muted" style="font-size:12px">há 12 s</span></div>
+    <div class="fstat">${ic("shield")}<div><b>2 itens pedem atenção</b><span>svchost.exe na pasta Temp · dispositivo novo</span></div></div>
+    <div class="mini">
+      <div class="card metric"><div class="lbl"><span>CPU</span></div><div class="val">${last("cpu").toFixed(0)} %</div>${spark(S.cpu.slice(-30))}</div>
+      <div class="card metric"><div class="lbl"><span>Memória</span></div><div class="val">${(last("mem") * .32).toFixed(1)} GB</div>${spark(S.mem.slice(-30))}</div>
+      <div class="card metric"><div class="lbl"><span>Rede</span></div><div class="val">${(last("net") / 7).toFixed(1)} Mb/s</div>${spark(S.net.slice(-30))}</div>
+      <div class="card metric"><div class="lbl"><span>Na rede</span></div><div class="val">9 <small>· 1 novo</small></div><span class="muted" style="font-size:12px">Varredura há 4 min</span></div>
+    </div>
+    <div class="list">${ALERTS[0].items.slice(0, 3).map(a => `<div class="row" data-open="${a.go}" ${a.pick ? `data-pick="${a.pick}"` : ""} style="cursor:pointer"><span class="sev ${a.sev}"></span><div class="grow"><b>${esc(a.title)}</b><span>${a.t} · ${esc(a.sub)}</span></div></div>`).join("")}</div>
+  </div>
+  <div class="ffoot">
+    <button class="link-btn" data-open="overview">${ic("home")}Abrir SmartGuardian</button>
+    <div style="display:flex;gap:2px"><button class="link-btn" data-toast="Verificação completa: nada novo.">${ic("refresh")}</button><button class="link-btn" data-open="settings">${ic("gear")}</button></div>
+  </div>`;
+}
+
+/* ---------------- render e eventos ---------------- */
+function render() {
+  renderNav();
+  $("#main").innerHTML = `<div class="view">${V[st.view]()}</div>`;
+  if (st.view === "ai") { const m = $("#msgs"); m.scrollTop = m.scrollHeight; }
+}
+
+let toastTimer;
+function toast(title, text) {
+  const t = $("#toast");
+  t.innerHTML = `<b>${esc(title)}</b>${text ? `<span class="muted">${esc(text)}</span>` : ""}`;
+  t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 4200);
+}
+
+function setMode(tray) {
+  $("#win").hidden = tray; $("#desk").hidden = !tray;
+  $("#mode-win").setAttribute("aria-pressed", !tray); $("#mode-tray").setAttribute("aria-pressed", tray);
+  if (tray) renderFlyout();
+}
+
+function aiAnswer(q) {
+  st.chat.push({ me: true, t: q });
+  st.chat.push({ me: false, t: `<p class="muted">No app de verdade, esta pergunta iria para o LM Studio junto com um resumo do estado atual (processos com pontuação, conexões, alertas de hoje). A resposta aparece aqui aos poucos, conforme o modelo escreve.</p>` });
+  render();
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-go],[data-pick],[data-toast],[data-lan],[data-pf],[data-ai],[data-ask],[data-open],#scan,#tb-min,#tb-close,#mode-win,#mode-tray,#tray-ico");
+  if (!el) return;
+  if (el.id === "mode-win") return setMode(false);
+  if (el.id === "mode-tray" || el.id === "tb-min") return setMode(true);
+  if (el.id === "tray-ico") { const f = $("#flyout"); f.hidden = !f.hidden; return; }
+  if (el.id === "tb-close") { setMode(true); return toast("O SmartGuardian continua na bandeja", "Para encerrar de vez, clique com o botão direito no ícone e escolha Sair."); }
+  if (el.dataset.toast) return toast(el.dataset.toast);
+  if (el.dataset.open) { setMode(false); return go(el.dataset.open, +el.dataset.pick || 0); }
+  if (el.dataset.lan) { st.lanFilter = el.dataset.lan; return render(); }
+  if (el.dataset.pf) { st.procFilter = el.dataset.pf; return render(); }
+  if (el.dataset.ask) return aiAnswer(el.dataset.ask);
+  if (el.dataset.ai) {
+    const p = PROCS.find(x => x.pid === +el.dataset.ai);
+    go("ai");
+    return aiAnswer(p ? `Analise o processo ${p.name} (PID ${p.pid}) em ${p.path}` : "Resuma os alertas de hoje");
+  }
+  if (el.id === "scan" && !st.scanning) {
+    st.scanning = true; render(); let pct = 0;
+    const tick = setInterval(() => { pct += 5; const b = $("#scanbar"); if (b) b.style.width = pct + "%";
+      if (pct >= 100) { clearInterval(tick); st.scanning = false; if (st.view === "lan") render(); toast("Varredura concluída", "254 endereços em 9 s · 9 dispositivos · nenhum novo desde a última varredura"); } }, 450);
+    return;
+  }
+  if (el.dataset.go) return go(el.dataset.go, +el.dataset.pick || 0);
+  if (el.dataset.pick) { st.pick = +el.dataset.pick; return render(); }
+});
+document.addEventListener("input", e => {
+  if (e.target.id === "pq") { st.procQuery = e.target.value; render(); const i = $("#pq"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+});
+document.addEventListener("submit", e => {
+  if (e.target.id !== "ask") return; e.preventDefault();
+  const q = $("#askq").value.trim(); if (q) aiAnswer(q);
+});
+
+/* números ao vivo na visão geral e no painel da bandeja */
+setInterval(() => {
+  for (const [k, amp] of [["cpu", 8], ["mem", 1.2], ["disk", .1], ["net", 14]]) {
+    const a = S[k]; let v = a[a.length - 1] + (Math.random() - .5) * amp; v = Math.max(2, Math.min(95, v)); a.push(v); a.shift();
+  }
+  const m = $("#metrics"); if (m && !$("#win").hidden) m.innerHTML = metrics();
+  if (!$("#desk").hidden && !$("#flyout").hidden) renderFlyout();
+}, 2000);
+
+render();
+</script>

@@ -1,0 +1,139 @@
+"""Testes da pontuação: casos legítimos comuns não podem gerar aviso; casos de ataque, sim.
+
+    .venv\\Scripts\\python.exe -m unittest discover -s tests -v
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core import rules as R  # noqa: E402
+from core.conns import Conn  # noqa: E402
+from core.procs import Proc  # noqa: E402
+from core.signature import Signature  # noqa: E402
+
+HOME = os.path.expanduser("~")
+TEMP = os.environ["TEMP"]
+SIGNED = Signature("file", "Discord Inc.")
+MS_CATALOG = Signature("catalog", "Microsoft Windows")
+UNSIGNED = Signature("none")
+
+
+def proc(exe, sig, name=None, parent="explorer.exe", cmd=""):
+    return Proc(pid=1000, name=name or os.path.basename(exe), exe=exe, ppid=1, parent=parent, user="usuario",
+                started=0, cmdline=cmd, rss=0, sig=sig)
+
+
+def internet(port=443):
+    return Conn(1000, "TCP", "192.168.0.10", 50000, "185.220.101.47", port, "Estabelecida", "internet")
+
+
+class Legitimate(unittest.TestCase):
+    """Programas comuns: precisam ficar abaixo do limite de aviso (30)."""
+
+    def setUp(self):
+        self.rules = R.load()
+
+    def check_quiet(self, p, **kw):
+        s = R.score(p, self.rules, **kw)
+        self.assertFalse(s.strong, s.reasons)
+        self.assertLess(s.total, 30, s.reasons)
+        return s
+
+    def test_discord_signed_in_appdata(self):
+        s = self.check_quiet(proc(rf"{HOME}\AppData\Local\Discord\app-1.0.9265\Discord.exe", SIGNED), conns=[internet()])
+        self.assertEqual(s.total, 0)
+
+    def test_git_tools_unsigned_in_program_files(self):
+        s = self.check_quiet(proc(r"C:\Program Files\Git\usr\bin\bash.exe", UNSIGNED, parent="claude.exe"))
+        self.assertEqual(s.total, 5)
+
+    def test_store_app_package(self):
+        exe = r"C:\Program Files\WindowsApps\Microsoft.WidgetsPlatformRuntime_1.6.19.0_x64__8wekyb3d8bbwe\WidgetService\WidgetService.exe"
+        self.assertEqual(self.check_quiet(proc(exe, Signature("package", "Microsoft Corporation"))).total, 0)
+
+    def test_real_svchost(self):
+        self.check_quiet(proc(r"C:\Windows\System32\svchost.exe", MS_CATALOG, parent="services.exe"), conns=[internet()])
+
+    def test_defender_in_programdata(self):
+        exe = r"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.26090.9-0\MsMpEng.exe"
+        self.assertEqual(self.check_quiet(proc(exe, Signature("file", "Microsoft Windows Publisher"), parent="services.exe")).total, 0)
+
+    def test_signed_installer_in_temp(self):
+        self.check_quiet(proc(rf"{TEMP}\setup_chrome\setup.exe", Signature("file", "Google LLC")))
+
+    def test_python_in_venv_listening_locally(self):
+        listen = [Conn(1000, "TCP", "127.0.0.1", 1234, "", 0, "Escutando", "pc")]
+        self.check_quiet(proc(r"C:\SmartDevices\.venv\Scripts\pythonw.exe", Signature("file", "Python Software Foundation")), listens=listen)
+
+    def test_old_program_expired_certificate(self):
+        self.check_quiet(proc(r"C:\Program Files (x86)\Velho\app.exe", Signature("file", "Velho Ltda", "certificado vencido")))
+
+    def test_unsigned_alone_never_alerts(self):
+        """Nenhum sinal sozinho chega a 30, exceto as regras fortes."""
+        self.check_quiet(proc(r"D:\Jogos\mod\launcher.exe", UNSIGNED))
+
+
+class Suspicious(unittest.TestCase):
+    def setUp(self):
+        self.rules = R.load()
+
+    def test_fake_svchost_in_temp_even_if_signed_copy(self):
+        """Cópia idêntica do svchost (assinatura válida da Microsoft) rodando da pasta Temp."""
+        s = R.score(proc(rf"{TEMP}\svchost.exe", MS_CATALOG, parent="powershell.exe"), self.rules)
+        self.assertTrue(s.strong)
+        self.assertEqual(R.severity(s.total, s.strong, 30), "bad")
+
+    def test_bad_port(self):
+        s = R.score(proc(r"C:\Tools\nc.exe", UNSIGNED), self.rules, conns=[internet(4444)])
+        self.assertTrue(s.strong)
+
+    def test_unsigned_in_appdata_on_internet(self):
+        s = R.score(proc(rf"{HOME}\AppData\Roaming\FreeConvert\updater_x64.exe", UNSIGNED), self.rules, conns=[internet()])
+        self.assertGreaterEqual(s.total, 30)
+        self.assertFalse(s.strong)
+
+    def test_word_spawning_encoded_powershell(self):
+        p = proc(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", MS_CATALOG, parent="WINWORD.EXE",
+                 cmd="powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA")
+        s = R.score(p, self.rules)
+        self.assertGreaterEqual(s.total, 30)
+
+    def test_tampered_signature_in_downloads(self):
+        s = R.score(proc(rf"{HOME}\Downloads\crack.exe", Signature("invalid", "Adobe Inc.", "arquivo alterado depois de assinado")), self.rules)
+        self.assertGreaterEqual(s.total, 30)
+
+
+    def test_unsigned_in_user_writable_windows_folder(self):
+        """A pasta Tasks do Windows aceita gravação de qualquer usuário: não conta como pasta protegida."""
+        s = R.score(proc(r"C:\Windows\Tasks\update.exe", UNSIGNED), self.rules, conns=[internet()])
+        self.assertGreaterEqual(s.total, 30)
+
+    def test_fake_svchost_in_windows_tasks(self):
+        s = R.score(proc(r"C:\Windows\Tasks\svchost.exe", MS_CATALOG), self.rules)
+        self.assertTrue(s.strong)
+
+
+class Limits(unittest.TestCase):
+    def test_rules_file_cannot_raise_common_weight_above_25(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "rules.json"
+            f.write_text(json.dumps({"weights": {"unsigned": 90, "fake_system_name": 50}}), encoding="utf-8")
+            with mock.patch.object(R, "RULES_FILE", f):
+                rules = R.load()
+        self.assertEqual(rules["weights"]["unsigned"], 25)
+        self.assertEqual(rules["weights"]["fake_system_name"], 50)  # regra forte pode subir
+        for k, w in rules["weights"].items():
+            if k not in R.STRONG:
+                self.assertLessEqual(w, R.MAX_WEIGHT)
+
+
+if __name__ == "__main__":
+    unittest.main()
