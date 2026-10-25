@@ -3,6 +3,7 @@ e só para o endereço configurado (por padrão, este PC)."""
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -46,9 +47,21 @@ def models(base: str) -> list[str]:
     return [m["id"] for m in model_list(base)]
 
 
-def chat(base: str, model: str, context: str, history: list[dict], timeout: float = 180) -> str:
-    messages = [{"role": "system", "content": f"{SYSTEM}\n\nDADOS ATUAIS DO PC:\n{context}"}]
-    messages += [{"role": m["role"], "content": m["content"]} for m in history[-12:] if m.get("role") in ("user", "assistant")]
+HISTORY_CHARS = 4000  # conversa enviada junto: as mensagens mais recentes que couberem
+
+
+def chat(base: str, model: str, context: str, history: list[dict], timeout: float = 180) -> dict:
+    """Devolve {"text", "model" (o que o LM Studio usou de fato), "secs"}."""
+    msgs, size = [], 0
+    for m in reversed([m for m in history if m.get("role") in ("user", "assistant")]):
+        if msgs and size + len(m["content"]) > HISTORY_CHARS:
+            break
+        msgs.insert(0, {"role": m["role"], "content": m["content"]})
+        size += len(m["content"])
+    while msgs and msgs[0]["role"] != "user":  # a conversa enviada começa sempre por uma pergunta
+        msgs.pop(0)
+    messages = [{"role": "system", "content": f"{SYSTEM}\n\nDADOS ATUAIS DO PC:\n{context}"}] + msgs
+    t = time.perf_counter()
     try:
         data = _req(base.rstrip("/") + "/chat/completions",
                     # folga grande: modelos que raciocinam antes (Gemma 4, Qwen 3) gastam centenas de tokens pensando
@@ -67,4 +80,4 @@ def chat(base: str, model: str, context: str, history: list[dict], timeout: floa
         raise RuntimeError("O modelo não chegou a responder (gastou o limite raciocinando). Pergunte de novo, de forma mais curta.")
     if choice.get("finish_reason") == "length":
         text += "\n\n(resposta cortada pelo limite de tamanho)"
-    return text
+    return {"text": text, "model": data.get("model") or model, "secs": round(time.perf_counter() - t, 1)}

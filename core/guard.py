@@ -466,9 +466,14 @@ class Guard:
         if fresh:
             self.db.many("insert or ignore into startup_seen(key, first_seen) values(?, ?)", [(i["key"], now) for i in fresh])
         first = {r["key"]: r["first_seen"] for r in self.db.q("select key, first_seen from startup_seen")}
+        base_ts = baseline
+        if base_ts is True:  # versões antigas guardavam só True: a referência é quando a primeira lista foi feita
+            base_ts = min(first.values(), default=now)
+            self.db.set_meta("startup_baseline", base_ts)
         for i in items:
             i["first_seen"] = first.get(i["key"], now)
-            i["new"] = baseline and now - i["first_seen"] < 7 * 86400
+            # novo = apareceu depois da primeira lista e há menos de 7 dias
+            i["new"] = bool(base_ts) and i["first_seen"] > base_ts + 120 and now - i["first_seen"] < 7 * 86400
         if baseline:
             shells = self.rules["shells"]
             for i in fresh:
@@ -481,7 +486,7 @@ class Guard:
                            f"{i['kind_label']} · {i['command'][:200]} · {'sem assinatura' if i['sig'] == 'none' else i['signer'] or i['sig']}",
                            {"view": "startup", "key": i["key"]}, category="startup")
         else:
-            self.db.set_meta("startup_baseline", True)
+            self.db.set_meta("startup_baseline", now)
         with self.lock:
             self.startup = items
         self._changed()
@@ -524,39 +529,97 @@ class Guard:
                 "by_kind": {k: sum(1 for a in open_ if a["kind"] == k) for k in ("proc", "lan", "startup", "defender", "cpu")}}
 
     def ai_context(self, pid: int | None = None) -> str:
+        """Resumo em texto do estado do PC para o modelo. Compacto de propósito: o LM Studio costuma carregar
+        o modelo com 8K tokens, que precisam caber este resumo, a conversa, o raciocínio e a resposta."""
         s = self.system.snapshot()
         h = s["hist"]
-        lines = [f"PC {s['host']} · {s['os']} · ligado há {s['uptime'] / 3600:.1f} h",
-                 f"CPU {h['cpu'][-1] if h['cpu'] else 0:.0f} % · memória {s['mem_used'] / 2**30:.1f} de {s['mem_total'] / 2**30:.0f} GB",
-                 f"Período de aprendizado: {'faltam %.1f dias' % self.settings.learning_left() if self.settings.learning_left() else 'terminou'}"]
+        left = self.settings.learning_left()
         with self.lock:
-            procs = list(self.procs)
-            listens = list(self.listens)
-        risky = sorted([p for p in procs if p["score"] >= 15], key=lambda p: -p["score"])[:15]
-        lines.append(f"\nProcessos: {len(procs)} no total. Com pontuação de risco (0 = normal, 30+ = atenção, 60+ = alto):")
-        for p in risky:
-            lines.append(_proc_line(p))
-        if not risky:
-            lines.append("  nenhum acima de 15")
-        if pid:
-            p = next((x for x in procs if x["pid"] == pid), None)
-            if p:
-                lines.append("\nProcesso que o usuário pediu para analisar:\n" + _proc_line(p, full=True))
-        lines.append("\nAlertas abertos ou recentes:")
-        for a in self.db.q("select ts, sev, status, title, detail from alerts order by ts desc limit 15"):
-            lines.append(f"  [{datetime.fromtimestamp(a['ts']):%d/%m %H:%M}] {a['sev']}/{a['status']}: {a['title']} — {a['detail'][:220]}")
-        lines.append("\nPortas TCP abertas para a rede: " + (", ".join(f"{l['proc']} {l['addr']}:{l['port']}" for l in listens if l["scope"] != "pc")[:900] or "nenhuma"))
+            procs, listens, conns = list(self.procs), list(self.listens), list(self.conns)
+        by_pid = {p["pid"]: p for p in procs}
+        lines = [f"PC {s['host']} · {s['os']} · ligado há {s['uptime'] / 3600:.1f} h",
+                 f"CPU {h['cpu'][-1] if h['cpu'] else 0:.0f} % · memória {s['mem_used'] / 2**30:.1f} de {s['mem_total'] / 2**30:.0f} GB"
+                 f" · disco {s['drive']} {s['disk_used'] / 2**30:.0f} de {s['disk_total'] / 2**30:.0f} GB",
+                 f"Período de aprendizado: {'faltam %.1f dias (só regras fortes avisam)' % left if left else 'terminou'}",
+                 "Pontuação de risco: 0 = normal, 30+ = atenção, 60+ = alto."]
+
+        risky = sorted([p for p in procs if p["score"] >= 15], key=lambda p: -p["score"])[:12]
+        lines.append(f"\nPROCESSOS ({len(procs)} no total) com pontuação 15 ou mais:")
+        lines += [_proc_line(p) for p in risky] or ["  nenhum"]
+
+        unsigned, seen = [], set()
+        for p in sorted(procs, key=lambda p: -p["score"]):
+            if p["sig"] in ("none", "invalid") and p["exe"] and p["exe"] not in seen:
+                seen.add(p["exe"])
+                unsigned.append(p)
+        lines.append(f"\nPROCESSOS SEM ASSINATURA VÁLIDA ({len(unsigned)} programas):")
+        lines += [_proc_line(p) for p in unsigned[:10]] or ["  nenhum: todos os programas visíveis têm assinatura válida"]
+
+        top_cpu = [p for p in sorted(procs, key=lambda p: -p["cpu"]) if p["name"] and p["cpu"] >= 1][:5]
+        top_mem = [p for p in sorted(procs, key=lambda p: -p["rss"]) if p["name"]][:5]
+        lines.append("\nMAIS CPU: " + (", ".join(f"{p['name']} {p['cpu']:.0f} %" for p in top_cpu) or "nenhum processo acima de 1 %"))
+        lines.append("MAIS MEMÓRIA: " + ", ".join(f"{p['name']} {p['rss'] / 2**20:.0f} MB" for p in top_mem))
+
+        if pid and pid in by_pid:
+            lines.append("\nPROCESSO QUE O USUÁRIO PEDIU PARA ANALISAR:\n" + _proc_line(by_pid[pid], full=True))
+
+        net = defaultdict(list)
+        for c in conns:
+            if c["scope"] == "internet" and c["pid"]:  # PID 0: conexões já encerradas, sem dono
+                net[c["pid"]].append(c)
+        lines.append(f"\nCONEXÕES COM A INTERNET ({sum(map(len, net.values()))} de {len(net)} programas):")
+        for cpid, cs in sorted(net.items(), key=lambda kv: (-max(c["score"] for c in kv[1]), -len(kv[1])))[:12]:
+            p = by_pid.get(cpid, {})
+            dests = sorted({f"{c['host'] or c['raddr']}:{c['rport']}" + (" (PORTA SUSPEITA)" if c["bad_port"] else "") for c in cs})
+            lines.append(f"  {p.get('name', '?')} PID {cpid} ({_sig_short(p)}) · {len(cs)} conexões · {', '.join(dests[:4])}"
+                         + (f" e mais {len(dests) - 4}" if len(dests) > 4 else ""))
+        if not net:
+            lines.append("  nenhuma")
+
+        ports = {}
+        for l in listens:
+            if l["scope"] == "pc":
+                continue
+            k = (l["proc"], l["port"])
+            ports.setdefault(k, {"all": False, "bad": l["bad_port"], "pid": l["pid"]})
+            ports[k]["all"] |= l["all"]
+        lines.append("\nPORTAS TCP ABERTAS PARA A REDE (quem pode se conectar a este PC):")
+        for (proc, port), v in sorted(ports.items(), key=lambda kv: (not kv[1]["bad"], kv[0][1])):
+            lines.append(f"  porta {port} · {proc} ({_sig_short(by_pid.get(v['pid']) or {'pid': v['pid'], 'name': proc})}) · "
+                         f"{'todas as interfaces' if v['all'] else 'só uma interface'}{' · PORTA USADA POR INVASÃO' if v['bad'] else ''}")
+        if not ports:
+            lines.append("  nenhuma")
+
+        status_pt = {"open": "aberto", "learning": "registrado no aprendizado", "dismissed": "visto pelo usuário",
+                     "normal": "usuário marcou como normal"}
+        sev_pt = {"bad": "alto", "warn": "atenção", "info": "baixo", "ok": "normal"}
+        lines.append("\nALERTAS RECENTES:")
+        for a in self.db.q("select ts, sev, status, title, detail from alerts order by ts desc limit 12"):
+            lines.append(f"  [{datetime.fromtimestamp(a['ts']):%d/%m %H:%M}] {sev_pt.get(a['sev'], a['sev'])}, "
+                         f"{status_pt.get(a['status'], a['status'])}: {a['title']} — {a['detail'][:200]}")
+        if len(lines) and lines[-1] == "\nALERTAS RECENTES:":
+            lines.append("  nenhum")
+
         devs = self.devices()
-        lines.append(f"\nRede local: {sum(d['online'] for d in devs)} aparelhos online.")
-        for d in devs:
-            if d["online"]:
-                lines.append(f"  {d['ip']} {d['alias'] or d['name'] or 'sem nome'} · {d['vendor'] or 'fabricante desconhecido'} · {'conhecido' if d['known'] else 'NOVO/desconhecido'}")
-        news = [i for i in self.startup if i.get("new") or (not i["windows"] and i["sig"] in ("none", "invalid"))]
-        lines.append("\nInicialização (itens novos ou sem assinatura):")
-        for i in news[:15]:
-            lines.append(f"  {i['kind_label']}: {i['name']} → {i['command'][:160]} · {i['signer'] or i['sig']} · {'ativo' if i['enabled'] else 'desativado'}")
-        if not news:
-            lines.append("  nada novo")
+        lines.append(f"\nREDE LOCAL ({sum(d['online'] for d in devs)} aparelhos online agora, {len(devs)} já vistos):")
+        for d in devs[:20]:
+            when = "online" if d["online"] else f"fora da rede, visto {datetime.fromtimestamp(d['last_seen']):%d/%m %H:%M}"
+            who = "este PC" if d["self"] else "roteador" if d["gateway"] else ("conhecido" if d["known"] else "NOVO, não reconhecido")
+            lines.append(f"  {d['ip']} {d['alias'] or d['name'] or 'sem nome'} · {d['vendor'] or 'fabricante desconhecido'} · {who} · {when}")
+
+        with self.lock:
+            items = list(self.startup)
+        new = [i for i in items if i.get("new")]
+        third = [i for i in items if not i["windows"] and not i.get("new")]
+        lines.append(f"\nINICIALIZAÇÃO: {len(items)} itens; {len(new)} novos desde a primeira lista; {len(third)} de outros fabricantes (fora da Microsoft):")
+        for i in new[:10]:
+            lines.append(f"  NOVO · {_startup_line(i, full=True)}")
+        for i in third[:15]:
+            lines.append(f"  {_startup_line(i)}")
+
+        trusted = self.db.q("select label from trust order by ts desc limit 10")
+        if trusted:
+            lines.append("\nO USUÁRIO MARCOU COMO NORMAL: " + ", ".join(os.path.basename(t["label"]) for t in trusted))
         return "\n".join(lines)
 
     def ask(self, history: list[dict], pid: int | None = None) -> str:
@@ -565,7 +628,7 @@ class Guard:
         model = cfg.get("model") or next(iter(ai.models(cfg["url"])), "")
         if not model:
             raise RuntimeError("Nenhum modelo carregado no LM Studio. Carregue um modelo e tente de novo.")
-        return ai.chat(cfg["url"], model, self.ai_context(pid), history)
+        return ai.chat(cfg["url"], model, self.ai_context(pid), history)  # {"text", "model", "secs"}
 
     def report(self, with_ai: bool = False) -> Path:
         REPORTS.mkdir(exist_ok=True)
@@ -578,7 +641,7 @@ class Guard:
         summary = ""
         if with_ai:
             try:
-                summary = self.ask([{"role": "user", "content": "Escreva um resumo do dia de hoje para o relatório: o que está bem, o que pede atenção e o que fazer. Até 8 linhas."}])
+                summary = self.ask([{"role": "user", "content": "Escreva um resumo do dia de hoje para o relatório: o que está bem, o que pede atenção e o que fazer. Até 8 linhas."}])["text"]
             except Exception as e:
                 summary = f"(IA indisponível: {e})"
         e = html.escape
@@ -622,6 +685,23 @@ th{{font-size:12px;color:#5f5f5f}} .card{{background:#fff;border:1px solid #ddd;
                 w.writerow([c["proc"], c["pid"], c["proto"], f"{c['laddr']}:{c['lport']}", f"{c['raddr']}:{c['rport']}",
                             c["host"] or "", c["state"], c["scope"], c["score"]])
         return path
+
+
+def _sig_short(p: dict) -> str:
+    if p.get("pid") == 4 or p.get("name") == "System":
+        return "kernel do Windows"
+    if not p:
+        return "?"
+    if p.get("sig") in ("file", "catalog", "package"):
+        return f"assinado por {p.get('signer') or 'editora válida'}"
+    return {"none": "SEM assinatura", "invalid": "assinatura INVÁLIDA"}.get(p.get("sig"), "assinatura desconhecida")
+
+
+def _startup_line(i: dict, full: bool = False) -> str:
+    sig = (f"assinado por {i['signer']}" if i["sig"] in ("file", "catalog", "package")
+           else "SEM assinatura" if i["sig"] == "none" else "assinatura INVÁLIDA" if i["sig"] == "invalid" else "arquivo não encontrado")
+    what = i["command"][:180] if full else (os.path.basename(i["exe"]) or i["command"][:80])
+    return f"{i['name']} ({i['kind_label']}) → {what} · {sig} · {'ativo' if i['enabled'] else 'desativado'}"
 
 
 def _proc_line(p: dict, full: bool = False) -> str:

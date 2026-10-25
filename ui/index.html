@@ -584,7 +584,10 @@ V.ai = () => {
     <div class="card"><h3>O assistente está desligado</h3><p class="sub" style="margin-bottom:12px">Ele responde perguntas sobre a rede, os processos e os alertas, e explica por que algo foi marcado. Precisa do LM Studio aberto, com um modelo carregado e o servidor local ligado (aba Developer → Start Server).</p>
     <button class="btn primary" data-act="ai-on">Ativar o assistente</button></div>`;
   const model = S && (cfg.model || S.models[0]);
+  const chosen = S && S.model_list && S.model_list.find(x => x.id === cfg.model);
+  const loadedNow = S && S.model_list ? S.model_list.filter(x => x.loaded).map(x => x.id) : [];
   const status = !S ? '<span class="pill mute">Conferindo o LM Studio…</span>'
+    : S.reachable && chosen && !chosen.loaded ? `<span class="pill warn" title="Escolhido nas Configurações, mas não carregado no LM Studio">${esc(cfg.model)} não carregado${loadedNow.length ? " · responde " + esc(loadedNow[0]) : ""}</span>`
     : S.reachable ? `<span class="pill ok" title="LM Studio em ${esc(cfg.url)}">${model ? "Conectado · " + esc(model) : "Conectado, sem modelo carregado"}</span>`
     : `<span class="pill bad" title="Abra o LM Studio e ligue o servidor local em ${esc(cfg.url)} (Developer → Start Server)">LM Studio não respondeu</span>`;
   const day = ts => new Date(ts * 1000).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + hm(ts);
@@ -600,7 +603,7 @@ V.ai = () => {
         <button class="btn" data-act="report-ai">Relatório do dia</button>
       </div></div>
     <div class="msgs" id="msgs">${st.chat.length ? st.chat.map(m => m.role === "user" ? `<div class="msg me">${esc(m.content)}</div>`
-      : `<div class="msg ai ${m.err ? "err" : ""}"><div class="who">${ic("ai")}SmartGuardian IA</div>${md(m.content)}</div>`).join("")
+      : `<div class="msg ai ${m.err ? "err" : ""}"><div class="who">${ic("ai")}SmartGuardian IA${m.model ? ` · ${esc(m.model)}` : ""}${m.secs ? ` · ${fmtN(m.secs, 0)} s` : ""}</div>${md(m.content)}</div>`).join("")
       : '<div class="empty">Pergunte algo sobre o PC. A cada pergunta o assistente recebe um resumo atual: processos com pontuação, conexões, portas abertas, aparelhos na rede, inicialização e alertas.</div>'}
       ${st.aiBusy ? '<div class="msg ai"><div class="who">' + ic("ai") + 'SmartGuardian IA</div><span class="dots">Pensando</span></div>' : ""}</div>
     <div style="display:grid;gap:8px">
@@ -625,6 +628,9 @@ function modelHint() {
   if (!S) return "Buscando a lista no LM Studio…";
   if (!S.reachable) return "LM Studio não respondeu: abra o LM Studio, ligue o servidor local e clique em atualizar";
   const n = S.model_list.filter(m => m.loaded).length;
+  const cur = st.data.settings.ai.model, m = S.model_list.find(x => x.id === cur);
+  const loaded = S.model_list.filter(x => x.loaded).map(x => x.id);
+  if (cur && m && !m.loaded) return `<b style="color:var(--warn)">${esc(cur)} não está carregado.</b> ${loaded.length ? `O LM Studio vai responder com ${esc(loaded.join(", "))}` : "O LM Studio vai tentar carregá-lo na primeira pergunta"}.`;
   return `${S.model_list.length} modelo${S.model_list.length === 1 ? "" : "s"} no LM Studio, ${n} carregado${n === 1 ? "" : "s"}. Automático usa o primeiro carregado`;
 }
 V.settings = () => {

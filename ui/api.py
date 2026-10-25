@@ -193,18 +193,24 @@ class Api:
             chat_id = db.x("insert into chats(ts, title) values(?, ?)", (now, question[:80]))
         db.x("update chats set ts=? where id=?", (now, chat_id))
         db.x("insert into chat_msgs(chat_id, ts, role, content) values(?,?,?,?)", (chat_id, now, "user", question))
-        history = db.q("select role, content from chat_msgs where chat_id=? and err=0 order by id", (chat_id,))
+        rows = db.q("select role, content, err from chat_msgs where chat_id=? order by id", (chat_id,))
+        # tira as perguntas que deram erro (e o erro): o modelo não deve ver duas perguntas seguidas sem resposta
+        history = [r for k, r in enumerate(rows) if not r["err"]
+                   and not (r["role"] == "user" and k + 1 < len(rows) and rows[k + 1]["err"])]
         job = uuid.uuid4().hex
         self._jobs[job] = {"done": False, "chat_id": chat_id}
 
         def run():
+            model, secs = None, None
             try:
-                answer, err = self._g.ask(history, int(pid) if pid else None), 0
+                r = self._g.ask(history, int(pid) if pid else None)
+                answer, err, model, secs = r["text"], 0, r["model"], r["secs"]
+                log.info("IA respondeu: %s em %.1f s", model, secs)
             except Exception as e:
                 log.warning("IA: %s", e)
                 answer, err = str(e) or type(e).__name__, 1
-            db.x("insert into chat_msgs(chat_id, ts, role, content, err) values(?,?,?,?,?)",
-                 (chat_id, time.time(), "assistant", answer, err))
+            db.x("insert into chat_msgs(chat_id, ts, role, content, err, model, secs) values(?,?,?,?,?,?,?)",
+                 (chat_id, time.time(), "assistant", answer, err, model, secs))
             self._jobs[job] = {"done": True, "chat_id": chat_id}
         threading.Thread(target=run, name="ia", daemon=True).start()
         return {"job": job, "chat_id": chat_id}
@@ -226,7 +232,7 @@ class Api:
         chat = self._g.db.one("select id, ts, title from chats where id=?", (chat_id,))
         if not chat:
             return {"chat": None, "msgs": []}
-        msgs = self._g.db.q("select role, content, err, ts from chat_msgs where chat_id=? order by id", (chat_id,))
+        msgs = self._g.db.q("select role, content, err, ts, model, secs from chat_msgs where chat_id=? order by id", (chat_id,))
         pending = any(j.get("chat_id") == chat_id and not j["done"] for j in self._jobs.values())
         return {"chat": chat, "msgs": msgs, "pending": pending}
 

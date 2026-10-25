@@ -100,6 +100,11 @@ class Db:
         self.con = sqlite3.connect(path, check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
+        for col in ("model text", "secs real"):  # colunas acrescentadas depois; bancos antigos ganham aqui
+            try:
+                self.con.execute(f"alter table chat_msgs add column {col}")
+            except sqlite3.OperationalError:
+                pass
 
     def q(self, sql: str, args=()) -> list[dict]:
         with self._lock:
