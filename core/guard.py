@@ -561,6 +561,7 @@ class Guard:
 
     def ask(self, history: list[dict], pid: int | None = None) -> str:
         cfg = self.settings.get("ai")
+        # sem modelo escolhido: o primeiro carregado (a lista vem com os carregados na frente)
         model = cfg.get("model") or next(iter(ai.models(cfg["url"])), "")
         if not model:
             raise RuntimeError("Nenhum modelo carregado no LM Studio. Carregue um modelo e tente de novo.")

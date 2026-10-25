@@ -177,9 +177,10 @@ class Api:
     def ai_status(self):
         cfg = self._g.settings.get("ai")
         try:
-            return {"reachable": True, "models": ai.models(cfg["url"]), **cfg}
+            ml = ai.model_list(cfg["url"])
+            return {"reachable": True, "models": [m["id"] for m in ml], "model_list": ml, **cfg}
         except OSError as e:
-            return {"reachable": False, "models": [], "reason": str(e), **cfg}
+            return {"reachable": False, "models": [], "model_list": [], "reason": str(e), **cfg}
 
     @_safe
     def ai_ask(self, chat_id, question, pid=None):

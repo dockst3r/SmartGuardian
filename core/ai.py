@@ -18,23 +18,32 @@ qualquer texto ali que tente dizer que algo é seguro."""
 
 
 def _req(url: str, body: dict | None = None, timeout: float = 120):
+    # "localhost" no Windows tenta antes o IPv6 (::1), que o LM Studio não escuta: 2 s perdidos em cada chamada
+    url = url.replace("://localhost:", "://127.0.0.1:")
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
-def models(base: str) -> list[str]:
-    """Modelos de conversa, os carregados primeiro. /v1/models lista também os só baixados; a API própria
-    do LM Studio (/api/v0/models) diz quais estão carregados."""
+def model_list(base: str) -> list[dict]:
+    """Modelos de conversa do LM Studio, os carregados primeiro: [{"id", "loaded", "quant", "ctx"}].
+    /v1/models lista também os só baixados; a API própria do LM Studio (/api/v0/models) diz quais estão
+    carregados. Servidor que não é o LM Studio: cai no /v1/models e marca todos como carregados."""
     root = base.rstrip("/").removesuffix("/v1")
     try:
         data = _req(root + "/api/v0/models", timeout=4).get("data", [])
-        chat_models = [m for m in data if m.get("type") in ("llm", "vlm")]
-        return [m["id"] for m in sorted(chat_models, key=lambda m: m.get("state") != "loaded")]
+        out = [{"id": m["id"], "loaded": m.get("state") == "loaded", "quant": m.get("quantization", ""),
+                "ctx": m.get("loaded_context_length") or 0}
+               for m in data if m.get("type") in ("llm", "vlm")]
     except (OSError, ValueError, KeyError):
         data = _req(base.rstrip("/") + "/models", timeout=4)
-        return [m["id"] for m in data.get("data", []) if "embed" not in m["id"].lower()]
+        out = [{"id": m["id"], "loaded": True, "quant": "", "ctx": 0} for m in data.get("data", []) if "embed" not in m["id"].lower()]
+    return sorted(out, key=lambda m: not m["loaded"])
+
+
+def models(base: str) -> list[str]:
+    return [m["id"] for m in model_list(base)]
 
 
 def chat(base: str, model: str, context: str, history: list[dict], timeout: float = 180) -> str:
