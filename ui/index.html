@@ -163,7 +163,7 @@ td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .progress { height: 3px; border-radius: 2px; background: var(--line-2); overflow: hidden; }
 .progress i { display: block; height: 100%; background: var(--accent); transition: width .3s linear; }
 
-.chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; height: calc(100vh - 50px); }
+.chat { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); gap: 12px; height: calc(100vh - 50px); }
 .chat .msgs { max-width: 920px; width: 100%; justify-self: center; }
 .chat > .vhead { align-items: flex-start; }
 .chat > .vhead > .btn-row { padding-top: 4px; }
@@ -193,8 +193,9 @@ td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .name-btn:hover { background: var(--hover); }
 .name-btn:hover svg, .name-btn:focus-visible svg { opacity: 1; }
 .name-in { font: inherit; font-weight: 600; background: var(--bg); border: 1px solid var(--line-2); border-bottom: 2px solid var(--accent); border-radius: 4px; padding: 2px 6px; width: 220px; outline: none; }
-.msgs { overflow-y: auto; display: grid; gap: 12px; align-content: start; padding-right: 4px; }
-.msg { max-width: 80%; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+/* coluna minmax(0,1fr) e min-width:0: tabela ou comando largo não alarga a lista (senão ela rola de lado ao selecionar) */
+.msgs { overflow-y: auto; overflow-x: hidden; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding-right: 4px; }
+.msg { min-width: 0; max-width: 80%; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .msg.me { justify-self: end; background: var(--accent); color: var(--accent-ink); }
 .msg.ai { background: var(--card); border: 1px solid var(--line); }
 .msg.err { background: var(--bad-bg); }
@@ -208,8 +209,8 @@ td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .md ul, .md ol { margin: 0 0 8px; padding-left: 20px; } .md li { margin: 2px 0; }
 .md pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; overflow-x: auto; white-space: pre; font: 12.5px/1.45 Consolas, "Cascadia Mono", monospace; user-select: text; }
 .md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: var(--hover); padding: 0 4px; border-radius: 3px; }
-.md table { border-collapse: collapse; margin: 4px 0 10px; font-size: 12.5px; display: block; overflow-x: auto; }
-.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md table { border-collapse: collapse; margin: 4px 0 10px; font-size: 12.5px; display: block; max-width: 100%; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; white-space: normal; overflow-wrap: break-word; }
 .md th { background: var(--hover); font-weight: 600; }
 .tools-used { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-2); align-items: center; }
 .tools-used span { background: var(--hover); border-radius: 10px; padding: 1px 8px; }
