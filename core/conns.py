@@ -50,8 +50,11 @@ def snapshot() -> tuple[list[Conn], list[Conn]]:
         la, lp = (c.laddr.ip, c.laddr.port) if c.laddr else ("", 0)
         if c.raddr:
             out.append(Conn(c.pid or 0, proto, la, lp, c.raddr.ip, c.raddr.port, STATES.get(c.status, c.status), scope(c.raddr.ip)))
-        elif c.status == "LISTEN":
-            listen.append(Conn(c.pid or 0, proto, la, lp, "", 0, "Escutando", "pc" if scope(la) == "pc" else "local"))
+        elif c.status == "LISTEN" or (proto == "UDP" and 0 < lp < 49152):
+            # UDP não tem "escutando": socket sem destino numa porta fixa é porta aberta. Portas 49152+ são as
+            # temporárias que o Windows sorteia para conexões de saída (QUIC, DNS…), não serviço aberto.
+            listen.append(Conn(c.pid or 0, proto, la, lp, "", 0, "Escutando" if proto == "TCP" else "Aberta (UDP)",
+                               "pc" if scope(la) == "pc" else "local"))
     return out, listen
 
 

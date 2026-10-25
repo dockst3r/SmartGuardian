@@ -119,6 +119,7 @@ class App:
         self.guard.start()
         threading.Thread(target=self._promote_icon, daemon=True).start()
         threading.Thread(target=self._theme_watch, daemon=True).start()
+        threading.Thread(target=win.wait_show, args=(self.show, lambda: self._quitting), name="mostrar", daemon=True).start()
         if not self._start_hidden:
             time.sleep(0.3)
             self.show(os.environ.get("SG_OPEN_VIEW"))
@@ -191,14 +192,26 @@ class App:
         self.window.destroy()
 
 
+def _already_open() -> None:
+    """Outra cópia já roda (atalho clicado com o app na bandeja): traz a janela dela para a frente."""
+    if "--tray" in sys.argv:
+        return  # início automático com o Windows: nada a mostrar
+    if not win.signal_show():  # cópia de uma versão antiga, sem o evento
+        win.message_box("O SmartGuardian já está aberto. Procure o ícone do escudo perto do relógio.")
+
+
 def main() -> None:
+    # antes de pedir administrador: se já está aberto, só mostra a janela (sem UAC à toa)
+    if win.another_instance_running():
+        _already_open()
+        return
     if not win.is_admin() and "--sem-admin" not in sys.argv:
         if win.relaunch_as_admin():
             return
         # recusou o UAC: segue com o que der para ver
         log.warning("rodando sem administrador")
     if not win.single_instance():
-        win.message_box("O SmartGuardian já está aberto. Procure o ícone do escudo perto do relógio.")
+        _already_open()
         return
     log.info("iniciando (admin=%s)", win.is_admin())
     win.set_app_id()

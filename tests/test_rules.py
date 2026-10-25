@@ -155,6 +155,44 @@ class HistorySize(unittest.TestCase):
         self.assertEqual(history_chars(118016), 60000)
 
 
+class Ports(unittest.TestCase):
+    """Porta de invasão só conta em conexão que o programa abriu para fora, nunca no loopback."""
+
+    def setUp(self):
+        self.rules = R.load()
+
+    def test_incoming_connection_from_bad_port_is_ignored(self):
+        listen = [Conn(1000, "TCP", "0.0.0.0", 8080, "", 0, "Escutando", "local")]
+        incoming = [Conn(1000, "TCP", "192.168.0.10", 8080, "192.168.0.50", 4444, "Estabelecida", "local")]
+        s = R.score(proc(r"C:\Program Files\App\server.exe", SIGNED), self.rules, conns=incoming, listens=listen)
+        self.assertFalse(s.strong, s.reasons)
+
+    def test_loopback_is_ignored(self):
+        loop = [Conn(1000, "TCP", "127.0.0.1", 50000, "127.0.0.1", 4444, "Estabelecida", "pc")]
+        s = R.score(proc(r"C:\Program Files\App\app.exe", SIGNED), self.rules, conns=loop)
+        self.assertFalse(s.strong, s.reasons)
+
+    def test_ephemeral_ports_never_count_even_if_in_rules_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "rules.json"
+            f.write_text(json.dumps({"bad_ports": [4444, 54321]}), encoding="utf-8")
+            with mock.patch.object(R, "RULES_FILE", f):
+                rules = R.load()
+        self.assertEqual(rules["bad_ports"], {4444})
+
+
+class EncodedCommand(unittest.TestCase):
+    B64 = "SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA"
+
+    def test_abbreviations_powershell_accepts(self):
+        for flag in ("-e", "-ec", "-en", "-enc", "-EncodedCom", "-EncodedCommand", "/enc", "\u2013enc"):
+            self.assertTrue(R.ENCODED.search(f" powershell {flag} {self.B64}"), flag)
+
+    def test_other_flags_do_not_match(self):
+        for cmd in ("powershell -ExecutionPolicy Bypass -File x.ps1", f"node --enable-source-maps {self.B64}"):
+            self.assertFalse(R.ENCODED.search(" " + cmd), cmd)
+
+
 class Limits(unittest.TestCase):
     def test_rules_file_cannot_raise_common_weight_above_25(self):
         with tempfile.TemporaryDirectory() as d:

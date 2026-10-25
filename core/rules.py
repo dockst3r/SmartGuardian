@@ -37,7 +37,7 @@ DEFAULT_RULES = {
         "gpu_untrusted": 25,
         "unsigned_protected": 5,
     },
-    "bad_ports": [4444, 1337, 31337, 6666, 6667, 12345, 54321],
+    "bad_ports": [4444, 1337, 31337, 6666, 6667, 12345],
     "system_names": ["svchost.exe", "lsass.exe", "csrss.exe", "smss.exe", "wininit.exe", "winlogon.exe", "services.exe",
                      "spoolsv.exe", "taskhostw.exe", "sihost.exe", "dllhost.exe", "conhost.exe", "ctfmon.exe", "dwm.exe",
                      "fontdrvhost.exe", "lsaiso.exe", "runtimebroker.exe", "searchindexer.exe", "wmiprvse.exe",
@@ -74,7 +74,8 @@ TEMP_DIRS = [os.path.normcase(p) for p in (os.environ.get("TEMP", ""), os.path.j
 WRITABLE_IN_WINDOWS = [os.path.normcase(os.path.join(WINDIR, d)) for d in (
     "Tasks", "Tracing", r"System32\Tasks", r"System32\spool\drivers\color", r"Registration\CRMLog",
     r"System32\Microsoft\Crypto\RSA\MachineKeys", r"SysWOW64\Tasks", r"SysWOW64\com\dmp")]
-ENCODED = re.compile(r"\s-(e|ec|enc|enco|encod|encode|encoded|encodedc|encodedcommand)\s+[A-Za-z0-9+/=]{20,}", re.I)
+# -EncodedCommand e qualquer abreviação que o PowerShell aceita (-e, -ec, -en, -enc… e também com / ou travessão)
+ENCODED = re.compile(r"\s[-/\u2013\u2014](ec|e(n(c(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)?)\s+[A-Za-z0-9+/=]{20,}", re.I)
 
 
 def load() -> dict:
@@ -94,7 +95,8 @@ def load() -> dict:
     rules["system_names"] = {n.lower() for n in rules["system_names"]}
     rules["office_apps"] = {n.lower() for n in rules["office_apps"]}
     rules["shells"] = {n.lower() for n in rules["shells"]}
-    rules["bad_ports"] = set(int(p) for p in rules["bad_ports"])
+    # portas temporárias (49152+) são sorteadas pelo Windows para qualquer conexão: dariam falso "forte"
+    rules["bad_ports"] = {int(p) for p in rules["bad_ports"] if int(p) < 49152}
     return rules
 
 
@@ -164,7 +166,10 @@ def score(proc, rules: dict, *, conns=(), listens=(), new_exe: bool = False, gpu
     if name in rules["shells"] and parent in rules["office_apps"]:
         s.add(rules, "office_spawns_shell", parent=proc.parent)
 
-    bad = next((c.rport for c in conns if c.rport in rules["bad_ports"]), None) or \
+    # rport só conta em conexão que ESTE programa abriu para fora: em conexão que chega a uma porta dele, o
+    # rport é a porta temporária do outro lado. Conexões dentro do próprio PC (loopback) não contam.
+    own_ports = {c.lport for c in listens}
+    bad = next((c.rport for c in conns if c.scope != "pc" and c.lport not in own_ports and c.rport in rules["bad_ports"]), None) or \
         next((c.lport for c in listens if c.lport in rules["bad_ports"]), None)
     if bad:
         s.add(rules, "bad_port", port=bad)

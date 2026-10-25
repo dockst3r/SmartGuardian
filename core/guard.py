@@ -34,6 +34,25 @@ from .system import System
 CRITICAL = {"csrss.exe", "wininit.exe", "winlogon.exe", "smss.exe", "services.exe", "lsass.exe", "lsaiso.exe",
             "svchost.exe", "dwm.exe", "fontdrvhost.exe", "registry", "memcompression", "system", "secure system"}
 SEV_RANK = {"ok": 0, "info": 1, "warn": 2, "bad": 3}
+HASH_TTL = 600  # s: o hash de um arquivo é recalculado depois disso, mesmo com tamanho e data iguais
+
+
+def _ancestors() -> list:
+    try:
+        return psutil.Process().parents()
+    except psutil.Error:
+        return []
+
+
+def _own_executables() -> set[str]:
+    """Executáveis que rodam o SmartGuardian: o pythonw do venv (lançador), o Python base e os processos pai."""
+    paths = {sys.executable, getattr(sys, "_base_executable", ""), str(Path(sys.executable).with_name("pythonw.exe"))}
+    for p in [psutil.Process(), *_ancestors()]:
+        try:
+            paths.add(p.exe())
+        except psutil.Error:
+            pass
+    return {os.path.normcase(x) for x in paths if x}
 from .store import ROOT, Db, Settings, write_json
 
 log = logging.getLogger("smartguardian.guard")
@@ -52,6 +71,8 @@ class Guard:
         self.gpu = Gpu()
         self.gpu_procs = GpuProcesses()
         self._gpu_hist: dict[int, deque] = {}   # PID → últimas leituras de uso de GPU (para "uso sustentado")
+        self._check_lock = threading.Lock()   # "Verificar agora" e o laço de 5 s não rodam ao mesmo tempo
+        self._alert_lock = threading.Lock()   # consulta + insert do alerta sem duplicar
         self.resolver = C.Resolver()
         self.lock = threading.RLock()
         self.listeners: list = []          # fn(title, text, sev): notificações
@@ -143,6 +164,8 @@ class Guard:
             except Exception:
                 log.exception("varredura da rede falhou")
                 self.scan_progress = None
+                with self.lock:  # sem rede: nada de aparelhos "online" com dados velhos
+                    self.lan_info = {k: v for k, v in self.lan_info.items() if k != "live"} | {"live": {}}
             interval = self.settings.get("lan_interval", 300)
             self._scan_now.wait(interval if interval > 0 else None)
             self._scan_now.clear()
@@ -152,7 +175,9 @@ class Guard:
             try:
                 self.netinfo = lan.connection_info(self.settings.get("public_ip", False), self.netinfo)
             except Exception:
-                log.exception("informações da conexão")
+                log.warning("sem conexão de rede", exc_info=True)
+                self.netinfo = {"ip": "", "gateway": "", "iface": "", "ssid": "", "type": "Sem conexão", "gateway_ms": None,
+                                "internet_ms": None, "dns": [], "public_ip": "", "ts": time.time()}
             self._stop.wait(60)
 
     def _slow_loop(self) -> None:
@@ -173,12 +198,13 @@ class Guard:
         except OSError:
             return ""
         key = (path, st.st_size, st.st_mtime_ns)
-        if key not in self._hashes:
+        cached = self._hashes.get(key)
+        if cached is None or time.time() - cached[1] > HASH_TTL:
             try:
-                self._hashes[key] = P.sha256(path)
+                cached = self._hashes[key] = (P.sha256(path), time.time())
             except OSError:
                 return ""
-        return self._hashes[key]
+        return cached[0]
 
     def trust_key(self, exe: str, sig) -> str:
         """Programa assinado: confia pela editora (continua confiável quando atualiza).
@@ -187,6 +213,10 @@ class Guard:
         return f"exe:{base}|{sig.signer}" if sig and sig.trusted else f"exe:{base}|{self._sha(exe)}"
 
     def check_processes(self) -> None:
+        with self._check_lock:
+            self._check_processes()
+
+    def _check_processes(self) -> None:
         procs = P.snapshot()
         conns, listens = C.snapshot()
         by_pid_c, by_pid_l = defaultdict(list), defaultdict(list)
@@ -218,6 +248,9 @@ class Guard:
         gpu_now = self.gpu_procs.sample()
         for pid, v in gpu_now.items():
             self._gpu_hist.setdefault(pid, deque(maxlen=3)).append(v["gpu"])
+        for pid, hist in self._gpu_hist.items():
+            if pid not in gpu_now:
+                hist.append(0.0)
 
         now = time.time()
         learning = self.settings.learning_left() > 0
@@ -287,7 +320,7 @@ class Guard:
             crow.append({"pid": c.pid, "proc": names.get(c.pid, "?"), "proto": c.proto, "laddr": c.laddr, "lport": c.lport,
                          "raddr": c.raddr, "rport": c.rport, "host": host, "state": c.state, "scope": c.scope,
                          "score": s, "sev": sv, "bad_port": c.rport in self.rules["bad_ports"]})
-        lrow = [{"pid": c.pid, "proc": names.get(c.pid, "System" if c.pid == 4 else "?"), "addr": c.laddr, "port": c.lport,
+        lrow = [{"pid": c.pid, "proc": names.get(c.pid, "System" if c.pid == 4 else "?"), "addr": c.laddr, "port": c.lport, "proto": c.proto,
                  "scope": c.scope, "all": c.laddr in ("0.0.0.0", "::"), "bad_port": c.lport in self.rules["bad_ports"]}
                 for c in listens]
         with self.lock:
@@ -298,6 +331,10 @@ class Guard:
     # ---------- alertas ----------
     def alert(self, kind: str, key: str, sev: str, title: str, detail: str, target: dict, *, rules=(), quiet=False,
               category: str = "") -> int | None:
+        with self._alert_lock:
+            return self._alert(kind, key, sev, title, detail, target, rules=rules, quiet=quiet, category=category)
+
+    def _alert(self, kind, key, sev, title, detail, target, *, rules, quiet, category) -> int | None:
         now = time.time()
         last = self.db.one("select id, ts, sev, status from alerts where key=? order by id desc limit 1", (key,))
         worse = last is not None and SEV_RANK.get(sev, 0) > SEV_RANK.get(last["sev"], 0)
@@ -360,9 +397,11 @@ class Guard:
         self._trust.discard(key)
 
     def _check_can_touch(self, p: psutil.Process) -> None:
-        """Recusa encerrar processos essenciais do Windows (derrubaria o sistema) e o próprio SmartGuardian."""
-        if p.pid in (0, 4) or p.pid == os.getpid():
-            raise RuntimeError("Este processo não pode ser encerrado por aqui.")
+        """Recusa encerrar processos essenciais do Windows (derrubaria o sistema) e o próprio SmartGuardian
+        (inclusive o lançador do venv, que é processo pai deste)."""
+        own = {os.getpid()} | {a.pid for a in _ancestors()}
+        if p.pid in (0, 4) or p.pid in own:
+            raise RuntimeError("Este processo não pode ser encerrado por aqui (é o próprio SmartGuardian ou o sistema).")
         try:
             exe = os.path.normcase(p.exe() or "")
         except psutil.Error:
@@ -372,12 +411,17 @@ class Guard:
         if p.name().lower() in CRITICAL and (not exe or R.under(exe, [R.WINDIR])):
             raise RuntimeError(f"{p.name()} é essencial para o Windows; encerrar derrubaria o sistema.")
 
-    def kill(self, pid: int) -> str:
-        p = psutil.Process(pid)
+    def kill(self, pid: int, started: float | None = None) -> str:
+        """Encerra só este processo (como o Gerenciador de Tarefas), não os que ele abriu: matar a árvore do
+        explorer, por exemplo, fecharia tudo que foi aberto pelo menu Iniciar."""
+        try:
+            p = psutil.Process(pid)
+            if started and abs(p.create_time() - started) > 1:  # PID reaproveitado por outro programa
+                raise psutil.NoSuchProcess(pid)
+        except psutil.NoSuchProcess:
+            raise RuntimeError("Esse processo já terminou; nada foi encerrado.") from None
         self._check_can_touch(p)
         name = p.name()
-        for child in p.children(recursive=True):
-            child.kill()
         p.kill()
         log.info("processo encerrado: %s (%s)", name, pid)
         return name
@@ -397,8 +441,8 @@ class Guard:
                                "não vai para a quarentena. Se não quiser ele, desinstale pelo Windows.")
         if sig.trusted and sig.signer.startswith("Microsoft") and not R.under(target, writable):
             raise RuntimeError("Arquivo assinado pela Microsoft; não vai para a quarentena.")
-        if target == os.path.normcase(sys.executable) or target == os.path.normcase(str(Path(sys.executable).with_name("pythonw.exe"))):
-            raise RuntimeError("Este é o Python do próprio SmartGuardian.")
+        if target in _own_executables():
+            raise RuntimeError("Este é o Python que roda o próprio SmartGuardian.")
         for p in psutil.process_iter(["exe"]):
             if p.info["exe"] and os.path.normcase(p.info["exe"]) == target:
                 try:
@@ -415,6 +459,7 @@ class Guard:
         return str(dest)
 
     def update_device(self, mac: str, alias: str | None = None, known: bool | None = None) -> None:
+        """alias muda só o nome; known (Conheço / Isso é normal) é o que fecha o alerta de aparelho novo."""
         if alias is not None:
             self.db.x("update devices set alias=? where mac=?", (alias.strip(), mac))
         if known is not None:
@@ -427,6 +472,10 @@ class Guard:
         item = next((i for i in self.startup if i["key"] == key), None)
         if not item:
             raise RuntimeError("Item não encontrado; atualize a lista.")
+        if not enabled and item.get("windows") and os.path.basename(item.get("exe", "")).lower() not in self.rules["shells"]:
+            # serviço/tarefa da Microsoft: desligar pode deixar o PC sem rede, firewall ou atualizações.
+            # Exceção: os que chamam powershell, cmd, mshta… (jeito comum de vírus se instalar com cara de Windows).
+            raise RuntimeError(f"{item['name']} faz parte do Windows; desligar por aqui pode quebrar o sistema.")
         startup.set_enabled(self.db, item, enabled)
         item["enabled"] = enabled
         log.info("inicialização: %s %s", "ativado" if enabled else "desativado", key)
@@ -550,7 +599,8 @@ class Guard:
 
     def cleanup(self) -> None:
         days = self.settings.get("history_days", 30)
-        self.db.x("delete from alerts where ts < ? and status != 'open'", (time.time() - days * 86400,))
+        # "aprendizado" e "normal" ficam: são a memória de que aquilo já foi visto; apagar faria o alerta voltar
+        self.db.x("delete from alerts where ts < ? and status = 'dismissed'", (time.time() - days * 86400,))
 
     # ---------- resumo, IA, relatório ----------
     def summary(self) -> dict:
@@ -621,11 +671,11 @@ class Guard:
         for l in listens:
             if l["scope"] == "pc":
                 continue
-            k = (l["proc"], l["port"])
+            k = (l["proc"], f"{l['proto']} {l['port']}")
             ports.setdefault(k, {"all": False, "bad": l["bad_port"], "pid": l["pid"]})
             ports[k]["all"] |= l["all"]
-        lines.append("\nPORTAS TCP ABERTAS PARA A REDE (quem pode se conectar a este PC):")
-        for (proc, port), v in sorted(ports.items(), key=lambda kv: (not kv[1]["bad"], kv[0][1])):
+        lines.append("\nPORTAS ABERTAS PARA A REDE (quem pode se conectar a este PC):")
+        for (proc, port), v in sorted(ports.items(), key=lambda kv: (not kv[1]["bad"], int(kv[0][1].split()[1]))):
             lines.append(f"  porta {port} · {proc} ({_sig_short(by_pid.get(v['pid']) or {'pid': v['pid'], 'name': proc})}) · "
                          f"{'todas as interfaces' if v['all'] else 'só uma interface'}{' · PORTA USADA POR INVASÃO' if v['bad'] else ''}")
         if not ports:

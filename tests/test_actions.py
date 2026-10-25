@@ -49,6 +49,42 @@ class Quarantine(unittest.TestCase):
             quarantine(sys.executable)
 
 
+class OwnProcess(unittest.TestCase):
+    def test_refuses_base_python_behind_the_venv(self):
+        base = getattr(sys, "_base_executable", "")
+        if not base or os.path.normcase(base) == os.path.normcase(sys.executable):
+            self.skipTest("sem Python base separado")
+        with self.assertRaises(RuntimeError):
+            quarantine(base)
+
+    def test_refuses_parent_process(self):
+        """O pythonw do venv é só um lançador: o pai deste processo também é o próprio app."""
+        with self.assertRaises(RuntimeError):
+            G.Guard._check_can_touch(None, psutil.Process(os.getppid()))
+
+    def test_stale_pid_is_refused(self):
+        me = psutil.Process()
+        with self.assertRaises(RuntimeError):
+            G.Guard.kill(None, me.pid, started=me.create_time() - 3600)  # mesmo PID, outro processo
+
+
+class Cleanup(unittest.TestCase):
+    def test_learned_and_normal_alerts_survive_cleanup(self):
+        """Apagar o registro do aprendizado faria o mesmo alerta voltar com notificação."""
+        import time
+        from core.store import Db
+        with tempfile.TemporaryDirectory() as d:
+            db = Db(Path(d) / "t.db")
+            old = time.time() - 90 * 86400
+            for status in ("learning", "normal", "dismissed"):
+                db.x("insert into alerts(ts, sev, kind, key, title, status) values(?,?,?,?,?,?)", (old, "warn", "proc", status, "t", status))
+            fake = SimpleNamespace(settings=SimpleNamespace(get=lambda k, d=None: 7), db=db)
+            G.Guard.cleanup(fake)
+            left = {r["status"] for r in db.q("select status from alerts")}
+            db.con.close()
+        self.assertEqual(left, {"learning", "normal"})
+
+
 class Kill(unittest.TestCase):
     def check(self, name):
         p = next((x for x in psutil.process_iter(["name"]) if x.info["name"] == name), None)

@@ -8,7 +8,7 @@ net session >nul 2>&1 || (
     exit /b
 )
 if not exist ".venv\Scripts\python.exe" (
-    echo Criando ambiente virtual...
+    echo Primeira vez: rode Instalar.bat antes; criando o ambiente agora...
     python -m venv .venv || goto :erro
     ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt || goto :erro
 )

@@ -41,13 +41,17 @@ class Api:
         self._g = guard
         self._app = app  # tray.App: hide(), quit()
         self._jobs: dict[str, dict] = {}
+        self._folder_check = (0.0, False)  # (quando, pasta gravável por todos E inicia com o Windows)
 
     # ---------- leitura ----------
     @_safe
     def state(self, view="overview"):
         g = self._g
         sysinfo = g.system.snapshot()
+        if time.time() - self._folder_check[0] > 60:
+            self._folder_check = (time.time(), win.folder_open_to_users() and win.startup_enabled())
         out = {"summary": g.summary(), "admin": win.is_admin(), "system": sysinfo, "now": time.time(), "gpu": g.gpu.snapshot(),
+               "folder_risk": self._folder_check[1],
                "interval": g.settings.get("interval", 5)}
         with g.lock:
             procs = list(g.procs)
@@ -60,7 +64,8 @@ class Api:
             out["devices"] = [d for d in devices if d["online"]][:8]
             out["top_mem"] = sorted(procs, key=lambda p: -p["rss"])[:5]
             out["gpu_users"] = sorted([p for p in procs if p["vram"] or p["gpu"] >= 1], key=lambda p: -p["vram"])[:5]
-            out["risky"] = sorted([p for p in procs if p["score"] >= g.settings.get("alert_threshold", 30)], key=lambda p: -p["score"])[:5]
+            thr = g.settings.get("alert_threshold", 30)
+            out["risky"] = sorted([p for p in procs if p["score"] >= thr or p["strong"]], key=lambda p: -p["score"])[:5]
         elif view == "lan":
             out["devices"] = devices
             out["net"] = g.netinfo
@@ -81,6 +86,9 @@ class Api:
         elif view == "settings":
             out["settings"] = g.settings.data
             out["startup_enabled"] = win.startup_enabled()
+            out["start_menu_enabled"] = win.start_menu_enabled()
+            out["folder_open"] = win.folder_open_to_users()
+            out["root"] = str(win.ROOT)
             out["trust"] = g.db.q("select key, ts, label from trust order by ts desc")
             out["stats"] = g.db.q("select * from rule_stats order by false_pos desc, alerts desc")
             out["weights"] = g.rules["weights"]
@@ -128,8 +136,8 @@ class Api:
             self._g.resolve_alert(a["id"], False)
 
     @_safe
-    def kill(self, pid):
-        return {"name": self._g.kill(int(pid))}
+    def kill(self, pid, started=None):
+        return {"name": self._g.kill(int(pid), float(started) if started else None)}
 
     @_safe
     def quarantine(self, exe):
@@ -255,8 +263,21 @@ class Api:
             self._g._scan_now.set()  # varre agora e segue o novo intervalo
 
     @_safe
+    def protect_folder(self):
+        if not win.is_admin():
+            raise RuntimeError("Precisa do SmartGuardian aberto como administrador.")
+        win.protect_folder()
+        return {"open": win.folder_open_to_users()}
+
+    @_safe
+    def set_start_menu(self, enabled):
+        win.set_start_menu(bool(enabled))
+        return {"start_menu": win.start_menu_enabled()}
+
+    @_safe
     def set_startup(self, enabled):
         win.set_startup(bool(enabled))
+        self._folder_check = (0.0, False)  # reavalia o aviso da pasta
         self._app._startup_cached = on = win.startup_enabled()  # o menu da bandeja mostra o mesmo estado
         return {"startup": on}
 

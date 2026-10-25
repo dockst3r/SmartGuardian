@@ -361,8 +361,10 @@ function go(view, pick) {
 async function load(force = false) {
   if (!window.pywebview || (!force && (!st.visible || MANUAL.has(st.view) || st.editing || !$("#modal").hidden))) return;
   try {
-    const d = await window.pywebview.api.state(st.view);
+    const view = st.view;
+    const d = await window.pywebview.api.state(view);
     if (d.error) throw new Error(d.error);
+    if (view !== st.view) return;  // o usuário trocou de tela enquanto esperava: esta resposta é da anterior
     st.data = d;
     render();
   } catch (e) { console.error(e); }
@@ -408,6 +410,7 @@ function banners() {
   const s = st.data.summary, out = [];
   if (!st.data.admin) out.push(`<div class="banner warn">${ic("shieldx")}<span>Rodando sem administrador: parte dos processos e conexões fica oculta e não dá para encerrar processos nem mexer na inicialização. Feche e abra pelo atalho para o Windows pedir permissão.</span></div>`);
   if (s.learning_left > 0) out.push(`<div class="banner info">${ic("ai")}<span><b>Período de aprendizado:</b> faltam ${fmtN(s.learning_left, s.learning_left < 1 ? 1 : 0)} dia${s.learning_left >= 1.5 ? "s" : ""}. O que já roda no PC vira o normal. Por enquanto, processos só geram aviso pelas regras fortes (o resto fica registrado em Alertas); mudanças na inicialização e aparelhos novos avisam normalmente.</span></div>`);
+  if (st.data.folder_risk) out.push(`<div class="banner warn">${ic("shieldx")}<span>A pasta do SmartGuardian pode ser alterada sem administrador, e ele inicia como administrador no login. Veja em Configurações → Proteger a pasta.</span><button class="btn small" data-go="settings">Configurações</button></div>`);
   if (s.paused_until) out.push(`<div class="banner warn">${ic("pause")}<span>Avisos pausados até ${hm(s.paused_until)}. O monitoramento continua.</span><button class="btn small" data-pause="0">Retomar</button></div>`);
   return out.join("");
 }
@@ -504,7 +507,7 @@ V.conns = () => {
       <td class="mono">${esc(c.raddr)}:${c.rport}${c.bad_port ? ' <span class="pill bad">porta suspeita</span>' : ""}</td>
       <td>${SC[c.scope]}</td><td>${esc(c.state)}</td><td>${scoreCell(c.score, c.sev)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nenhuma conexão neste filtro.</td></tr>'}</tbody></table></div>
   <div class="card"><h3>Portas abertas neste PC <small>quem pode se conectar ao seu computador</small></h3><div class="list">
-    ${ls.map(l => `<div class="row link" data-proc="${l.pid}"><span class="sev ${l.bad_port ? "bad" : l.scope === "pc" ? "ok" : l.all ? "warn" : "info"}"></span><div class="grow"><b class="mono">${esc(l.addr)}:${l.port}</b><span>${esc(l.proc)} · PID ${l.pid}</span></div><span class="muted" style="font-size:12.5px">${l.bad_port ? "Porta usada por ferramentas de invasão" : l.scope === "pc" ? "Só este PC" : l.all ? "Aberta para toda a rede" : "Só numa interface"}</span></div>`).join("") || '<div class="empty">Nenhuma porta TCP aberta.</div>'}
+    ${ls.map(l => `<div class="row link" data-proc="${l.pid}"><span class="sev ${l.bad_port ? "bad" : l.scope === "pc" ? "ok" : l.all ? "warn" : "info"}"></span><div class="grow"><b class="mono">${esc(l.proto)} ${esc(l.addr)}:${l.port}</b><span>${esc(l.proc)} · PID ${l.pid}</span></div><span class="muted" style="font-size:12.5px">${l.bad_port ? "Porta usada por ferramentas de invasão" : l.scope === "pc" ? "Só este PC" : l.all ? "Aberta para toda a rede" : "Só numa interface"}</span></div>`).join("") || '<div class="empty">Nenhuma porta TCP aberta.</div>'}
   </div></div>`;
 };
 
@@ -514,7 +517,8 @@ V.procs = () => {
   const keep = { all: () => true, attn: p => p.score >= 15, unsigned: p => p.sig === "none" || p.sig === "invalid", gpu: usesGpu }[st.procFilter] || (() => true);
   const rows = d.procs.filter(p => keep(p) && (!q || (p.name + " " + p.exe + " " + p.pid).toLowerCase().includes(q)))
     .sort(st.procFilter === "gpu" ? (a, b) => b.vram - a.vram || b.gpu - a.gpu : (a, b) => b.score - a.score || b.cpu - a.cpu || b.rss - a.rss);
-  const p = d.procs.find(x => x.pid === st.pick) || rows[0];
+  const picked = st.pick ? d.procs.find(x => x.pid === st.pick) : null;
+  const p = picked || (st.pick ? null : rows[0]);
   const attn = d.procs.filter(p => p.score >= 15).length, uns = d.procs.filter(p => p.sig === "none" || p.sig === "invalid").length;
   return `<div class="vhead"><div><h2>Processos</h2><p class="sub">${d.procs.length} processos · ${d.procs.filter(p => p.score >= d.threshold || p.strong).length} acima do limite de aviso (${d.threshold}) · ${uns} sem assinatura válida</p></div></div>
   <div class="toolbar">
@@ -531,7 +535,7 @@ V.procs = () => {
         <td><b style="font-weight:600">${esc(r.name || "(sem nome)")}</b><div class="muted clip" style="font-size:11.5px;max-width:300px" title="${esc(r.exe)}">${esc(r.exe || "—")}</div></td>
         <td class="r num">${r.pid}</td><td class="r num">${fmtN(r.cpu)} %</td><td class="r num">${fmtB(r.rss)}</td><td class="r num" title="Uso da GPU · VRAM dedicada">${r.gpu >= 1 ? fmtN(r.gpu, 0) + " %" : ""}${r.gpu >= 1 && r.vram ? " · " : ""}${r.vram ? fmtB(r.vram) : r.gpu >= 1 ? "" : '<span class="muted">—</span>'}</td><td>${sigCell(r)}</td><td>${scoreCell(r.score, r.sev)}</td></tr>`).join("")
         || `<tr><td colspan="6" class="muted">${st.procFilter === "attn" && !q ? "Nenhum processo com pontuação. Tudo normal." : "Nenhum processo encontrado."}</td></tr>`}</tbody></table></div>
-    ${p ? procDetail(p) : ""}
+    ${p ? procDetail(p) : st.pick ? `<aside class="detail"><div class="card"><h3>Processo ${st.pick}</h3><p class="sub">Esse processo já terminou. Escolha outro na lista.</p></div></aside>` : ""}
   </div>`;
 };
 function procDetail(p) {
@@ -556,7 +560,7 @@ function procDetail(p) {
     <div class="btn-row">
       <button class="btn primary" data-ai-proc="${p.pid}">${ic("ai")}Analisar com IA</button>
       ${p.exe ? `<button class="btn" data-loc="${esc(p.exe)}">${ic("folder")}Abrir local</button><button class="btn" data-vt="${esc(p.exe)}">VirusTotal</button>` : ""}
-      ${canAct ? `<button class="btn danger" data-kill="${p.pid}">${ic("stop")}Encerrar</button>` : ""}
+      ${canAct ? `<button class="btn danger" data-kill="${p.pid}" data-started="${p.started}">${ic("stop")}Encerrar</button>` : ""}
       ${canAct && p.score >= 15 ? `<button class="btn danger" data-quar="${esc(p.exe)}">${ic("box")}Quarentena</button>` : ""}
       ${p.exe && p.score > 0 && !p.trusted ? `<button class="btn" data-trust="${esc(p.exe)}">${ic("check")}Isso é normal</button>` : ""}
     </div>
@@ -665,6 +669,8 @@ V.settings = () => {
   return `<div class="vhead"><div><h2>Configurações</h2><p class="sub">Salvas em C:\\SmartGuardian\\settings.json. Pesos das regras em rules.json (as regras comuns valem no máximo 25 pontos).</p></div>
     <button class="btn" data-folder="root">${ic("folder")}Abrir pasta do programa</button></div>
   <div class="set-group"><h4>Geral</h4>
+    ${d.folder_open ? `<div class="banner warn">${ic("shieldx")}<span><b>A pasta ${esc(d.root)} pode ser alterada por qualquer programa sem administrador.</b> Como o SmartGuardian roda como administrador${d.startup_enabled ? " e inicia sozinho no login" : ""}, um programa malicioso poderia ganhar administrador alterando os arquivos dele. Proteger deixa só administradores alterarem; depois, atualizar (git pull, Instalar.bat) também vai pedir administrador.</span><button class="btn" data-act="protect" ${d.admin ? "" : "disabled"}>Proteger a pasta</button></div>` : ""}
+    ${row("Atalho no menu Iniciar", "Aparece na busca do Windows como um app comum, com o ícone do escudo", tg("s-startmenu", d.start_menu_enabled))}
     ${row("Iniciar com o Windows", "Começa só com o ícone na bandeja, já como administrador (tarefa agendada)", tg("s-startup", d.startup_enabled))}
     ${row("Fechar ou minimizar a janela mantém o programa na bandeja", "Para encerrar, use Sair no menu do ícone", tg("s-close", s.close_to_tray))}
   </div>
@@ -763,6 +769,7 @@ async function saveSetting(id, el) {
     "s-ai": { ai: { enabled: v } }, "s-ai-url": { ai: { url: v } }, "s-ai-model": { ai: { model: v } }, "s-vt": { vt_key: v },
   };
   if (id.startsWith("s-n-")) map[id] = { notify: { [id.slice(4)]: v } };
+  if (id === "s-startmenu") { await call("set_start_menu", v); toast(v ? "Atalho criado no menu Iniciar" : "Atalho removido do menu Iniciar", v ? "Procure \"SmartGuardian\" na busca do Windows." : ""); return; }
   if (id === "s-startup") { await call("set_startup", v); toast(v ? "Vai iniciar com o Windows" : "Não inicia mais com o Windows"); return; }
   if (!map[id]) return;
   await call("save_settings", map[id]);
@@ -775,6 +782,8 @@ document.addEventListener("change", async e => {
   const el = e.target;
   if (el.dataset.sukey) {
     const on = el.checked;
+    const it = (st.data.startup || []).find(x => x.key === el.dataset.sukey);
+    if (!on && !await modal({ title: `Desligar ${it ? it.name : "este item"}?`, text: `Ele não abre mais sozinho com o Windows${it && it.kind === "service" ? " (o serviço fica desativado)" : ""}. A entrada original fica guardada e volta igual ao religar.`, ok: "Desligar", danger: true })) { el.checked = true; return; }
     try { await call("set_startup_item", el.dataset.sukey, on); toast(on ? "Reativado" : "Desativado", on ? "" : "A entrada original ficou guardada; reative quando quiser."); }
     catch (err) { el.checked = !on; }
     return load(true);
@@ -786,7 +795,9 @@ async function finishEdit(save) {
   if (!i || !st.editing) return;
   const mac = st.editing, name = i.value.trim();
   st.editing = null;
-  if (save) { try { await call("update_device", mac, name, true); toast(name ? "Nome salvo" : "Nome apagado"); } catch (e) {} }
+  const dv = (st.data.devices || []).find(x => x.mac === mac);
+  const before = dv ? (dv.alias || dv.name || "") : "";
+  if (save && name !== before) { try { await call("update_device", mac, name, null); toast(name ? "Nome salvo" : "Nome apagado"); } catch (e) {} }
   load(true);
 }
 function closeHist() { st.histOpen = false; const p = $(".hist-pop"); if (p) p.remove(); const b = $('[data-act="hist"]'); if (b) b.setAttribute("aria-expanded", "false"); }
@@ -840,8 +851,8 @@ document.addEventListener("click", async e => {
     }
     if (D.kill) {
       const p = st.data.procs.find(x => x.pid === +D.kill);
-      if (!await modal({ title: `Encerrar ${p ? p.name : "processo"}?`, text: `PID ${esc(D.kill)}${p ? " · " + esc(p.exe) : ""}. Os processos abertos por ele também serão encerrados. O que não estiver salvo nesse programa será perdido.`, ok: "Encerrar", danger: true })) return;
-      const r = await call("kill", +D.kill); toast(`${r.name} encerrado`); return load(true);
+      if (!await modal({ title: `Encerrar ${p ? p.name : "processo"}?`, text: `PID ${esc(D.kill)}${p ? " · " + esc(p.exe) : ""}. O que não estiver salvo nesse programa será perdido.`, ok: "Encerrar", danger: true })) return;
+      const r = await call("kill", +D.kill, +D.started || null); toast(`${r.name} encerrado`); return load(true);
     }
     if (D.quar) {
       if (!await modal({ title: "Mover para a quarentena?", text: `Encerra todos os processos de <span class="mono">${esc(D.quar)}</span> e move o arquivo para C:\\SmartGuardian\\quarentena, de onde ele não roda. Dá para devolver manualmente depois.`, ok: "Mover", danger: true })) return;
@@ -862,6 +873,10 @@ document.addEventListener("click", async e => {
       case "ai-on": await call("save_settings", { ai: { enabled: true } }); await load(true); return aiStatus();
       case "ai-status": st.aiStatus = null; render(); return aiStatus();
       case "models-refresh": st.aiStatus = null; render(); return aiStatus();
+      case "protect": {
+        if (!await modal({ title: "Proteger a pasta do programa?", text: "Só administradores vão poder alterar os arquivos do SmartGuardian. Leva alguns segundos (a pasta inclui o ambiente do Python). Depois, para atualizar, use o Instalar.bat (ele pede administrador) ou um terminal como administrador.", ok: "Proteger" })) return;
+        toast("Protegendo a pasta…"); const r = await call("protect_folder"); toast(r.open ? "Não deu para proteger tudo" : "Pasta protegida", r.open ? "Veja o log." : ""); return load(true);
+      }
       case "ai-new": st.histOpen = false; return openChat(null);
       case "hist": st.histOpen = !st.histOpen; return render();
       case "report": case "report-ai": await call("report", D.act === "report-ai"); return toast("Gerando relatório", (D.act === "report-ai" ? "Com o resumo da IA leva até um minuto. " : "") + "Ele abre sozinho no navegador quando ficar pronto.");

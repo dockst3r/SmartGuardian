@@ -37,18 +37,34 @@ na rede, mudança na inicialização, detecções do Windows Defender e GPU pert
 
 ```
 git clone https://github.com/dockst3r/SmartGuardian.git
-cd SmartGuardian
-"SmartGuardian (terminal).bat"
 ```
 
-O `.bat` cria o ambiente (`.venv`) na primeira vez e lista no terminal os processos sem assinatura
-confiável. Depois disso:
+Depois, **dois cliques em `Instalar.bat`**. Ele cria o ambiente do Python (`.venv`), instala as
+bibliotecas, cria o atalho **SmartGuardian no menu Iniciar** e abre o app (o Windows pede permissão de
+administrador). Para atualizar: `git pull` e `Instalar.bat` de novo, que instala as bibliotecas novas.
 
-- **`SmartGuardian.vbs`** abre o app na bandeja (o Windows pede permissão de administrador).
+- Abra pelo **menu Iniciar** (ou pela busca do Windows) como qualquer app. Com o app já na bandeja,
+  o atalho só traz a janela para a frente, sem pedir permissão de novo.
 - Fechar ou minimizar a janela só esconde; o monitoramento continua. Para encerrar: botão direito no
   escudo → **Sair**.
 - **Configurações → Iniciar com o Windows** cria uma tarefa agendada que abre o app como
-  administrador sem pedir permissão a cada login.
+  administrador sem pedir permissão a cada login. **Atalho no menu Iniciar** liga e desliga o atalho.
+- **`SmartGuardian (terminal).bat`** lista no terminal os processos sem assinatura confiável
+  (`sg.py processos --todos` para todos).
+
+### Proteja a pasta do programa
+
+O SmartGuardian roda como administrador e pode iniciar sozinho no login. Se a pasta onde ele está
+puder ser alterada por usuários comuns (é o caso de uma pasta criada direto em `C:\`), qualquer
+programa sem administrador ganharia administrador só editando um arquivo dele. O app detecta isso e
+mostra um aviso; em **Configurações → Proteger a pasta**, só administradores passam a alterar os
+arquivos. Depois disso, para atualizar, use o `Instalar.bat` (ele pede administrador) ou um terminal
+como administrador para o `git pull`.
+
+Por que não um `.exe`? Para um programa de segurança que roda como administrador, poder ler o código
+antes de rodar é uma vantagem; um `.exe` sem assinatura digital pedindo administrador é justamente o
+que o próprio app ensina a desconfiar, e empacotadores como o PyInstaller costumam gerar alarme falso
+em antivírus.
 
 Por que administrador: sem isso o Windows esconde o caminho de boa parte dos processos e não deixa
 encerrar processos nem mexer na inicialização.
@@ -61,7 +77,7 @@ partir de 60. Pesos e listas ficam em `rules.json`, criado na primeira execuçã
 | Sinal | Pontos |
 |---|---|
 | Nome de processo do Windows fora da pasta do Windows (**forte**) | 40 |
-| Conexão ou porta aberta em porta usada por invasão: 4444, 1337, 31337… (**forte**) | 30 |
+| Conexão aberta pelo programa para uma porta usada por invasão (4444, 1337, 31337…), ou porta dessas aberta nele, TCP ou UDP (**forte**) | 30 |
 | Pasta temporária ou gravável por qualquer usuário · assinatura quebrada · comando codificado · Office abrindo terminal · GPU acima de 50 % por ~15 s sem assinatura válida (perfil de minerador) | 25 |
 | Sem assinatura digital | 20 |
 | Pasta do usuário (AppData, ProgramData) · Downloads | 15 |
@@ -102,12 +118,15 @@ Hotspot e temperatura da memória não existem na API oficial para placas GeForc
 
 ## Ações com proteção
 
-- **Encerrar** recusa processos essenciais do Windows (csrss, wininit, lsass, svchost do sistema…),
-  que derrubariam o sistema, e o próprio SmartGuardian.
+- **Encerrar** fecha só o processo escolhido (não os que ele abriu) e confere que é o mesmo processo
+  da tela, para não atingir outro programa que tenha reaproveitado o PID. Recusa processos essenciais
+  do Windows (csrss, wininit, lsass, svchost do sistema…) e o próprio SmartGuardian.
 - **Quarentena** encerra o processo e move o arquivo para `quarentena/`, com um `.json` dizendo de
-  onde veio. Recusa arquivos do Windows, arquivos assinados pela Microsoft e programas assinados
-  instalados em Program Files (para esses, desinstale ou use o Defender).
-- **Desligar da inicialização** nunca apaga: a entrada original fica guardada e volta igual ao religar.
+  onde veio. Recusa arquivos do Windows, arquivos assinados pela Microsoft, programas assinados
+  instalados em Program Files (para esses, desinstale ou use o Defender) e o Python que roda o app.
+- **Desligar da inicialização** pede confirmação e nunca apaga: a entrada original fica guardada e
+  volta igual ao religar. Serviços e tarefas do próprio Windows não são desligados por aqui (poderiam
+  deixar o PC sem rede ou firewall), exceto os que chamam powershell, cmd, mshta e similares.
 
 ## Assistente de IA (LM Studio)
 
@@ -159,12 +178,14 @@ Banco, configurações, log, relatórios e quarentena ficam na pasta do programa
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-30 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
+39 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
 verdadeiro, instalador assinado em Temp, certificado vencido, jogo e LM Studio com GPU a 100 %);
 ataques que **precisam** avisar (svchost falso em Temp e em `C:\Windows\Tasks`, porta 4444, AppData
 sem assinatura na internet, Word abrindo PowerShell codificado, assinatura adulterada, minerador em
-AppData); as proteções de Encerrar e Quarentena (testadas sem encerrar nem mover nada); e o tamanho
-do histórico enviado à IA.
+AppData, `powershell` com qualquer abreviação de `-EncodedCommand`); portas (conexão que chega e
+loopback não contam, porta temporária nunca é "porta de invasão"); as proteções de Encerrar e
+Quarentena (testadas sem encerrar nem mover nada, inclusive PID reaproveitado e o próprio Python);
+a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histórico enviado à IA.
 
 ## Arquitetura
 
@@ -187,7 +208,8 @@ do histórico enviado à IA.
 | `tray.py` | app da bandeja: janela, ícone, administrador, instância única |
 | `ui/index.html` | janela; tudo desenhado a partir de `api.state(view)` |
 | `ui/api.py` | funções que a janela chama no Python (perguntas à IA rodam em segundo plano) |
-| `ui/win.py` | detalhes do Windows: ícone, iniciar com o Windows, tema, cor de destaque |
+| `ui/win.py` | detalhes do Windows: ícone, administrador, instância única, atalho no menu Iniciar, iniciar com o Windows, tema |
+| `Instalar.bat` | instala ou atualiza: ambiente, bibliotecas, atalho no menu Iniciar |
 | `docs/prototipo.html` | protótipo navegável da interface, com dados de exemplo |
 
 ## Limitações conhecidas

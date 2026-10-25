@@ -16,6 +16,7 @@ import msvcrt
 import os
 import re
 import threading
+import time
 import xml.etree.ElementTree as ET
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -236,7 +237,10 @@ def _package(path: str) -> Signature | None:
     return Signature("package", cn.group(1).strip('"') if cn else publisher)
 
 
-_cache: dict[tuple, Signature] = {}
+# Validade do cache: arquivo trocado por outro de mesmo tamanho e com a data restaurada (truque comum)
+# não fica "assinado" para sempre; a assinatura é conferida de novo depois disso.
+CACHE_TTL = 600
+_cache: dict[tuple, tuple[Signature, float]] = {}
 _lock = threading.Lock()
 
 
@@ -248,12 +252,13 @@ def check(path: str) -> Signature:
         return Signature("unreadable", detail="arquivo não encontrado ou sem permissão")
     key = (os.path.normcase(path), st.st_size, st.st_mtime_ns)
     with _lock:
-        if key in _cache:
-            return _cache[key]
+        hit = _cache.get(key)
+        if hit and time.time() - hit[1] < CACHE_TTL:
+            return hit[0]
     try:
         sig = _embedded(path) or _catalog(path) or _package(path) or Signature("none")
     except OSError as e:
         sig = Signature("unreadable", detail=e.strerror or str(e))
     with _lock:
-        _cache[key] = sig
+        _cache[key] = (sig, time.time())
     return sig

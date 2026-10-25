@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import subprocess
 import sys
 import winreg
@@ -40,10 +41,86 @@ def relaunch_as_admin() -> bool:
     return shell32.ShellExecuteW(None, "runas", str(exe), args, str(ROOT), 1) > 32
 
 
-def single_instance(name: str = "Local\\SmartGuardianTray") -> bool:
-    global _mutex
-    _mutex = kernel32.CreateMutexW(None, False, name)
-    return kernel32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+# ---------- instância única e "mostrar a janela" vindo de uma segunda cópia ----------
+# A cópia aberta roda como administrador; o atalho do menu Iniciar abre outra como usuário comum. Os
+# objetos abaixo levam um descritor que deixa qualquer nível de integridade abrir e sinalizar, senão o
+# Windows negaria o acesso de baixo para cima e a segunda cópia não conseguiria avisar a primeira.
+MUTEX_NAME = "Local\\SmartGuardianTray"
+SHOW_EVENT = "Local\\SmartGuardianShow"
+_SDDL = "D:(A;;GA;;;WD)S:(ML;;NW;;;LW)"  # todos com acesso; rótulo de integridade baixa
+
+
+class SECURITY_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [("nLength", wintypes.DWORD), ("lpSecurityDescriptor", ctypes.c_void_p), ("bInheritHandle", wintypes.BOOL)]
+
+
+advapi32 = ctypes.windll.advapi32
+advapi32.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+                                           ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+    ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR), ctypes.c_void_p]
+kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+    wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.OpenMutexW.restype = wintypes.HANDLE
+kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateEventW.restype = wintypes.HANDLE
+kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.OpenEventW.restype = wintypes.HANDLE
+kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+SYNCHRONIZE, EVENT_MODIFY_STATE, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS = 0x00100000, 0x0002, 5, 183
+
+
+def _open_to_all() -> SECURITY_ATTRIBUTES | None:
+    sd = ctypes.c_void_p()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(_SDDL, 1, ctypes.byref(sd), None):
+        return None
+    return SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), sd, False)
+
+
+def another_instance_running() -> bool:
+    """Funciona antes de pedir administrador: acesso negado também quer dizer que já existe."""
+    h = kernel32.OpenMutexW(SYNCHRONIZE, False, MUTEX_NAME)
+    if h:
+        kernel32.CloseHandle(h)
+        return True
+    return ctypes.GetLastError() == ERROR_ACCESS_DENIED
+
+
+def single_instance() -> bool:
+    global _mutex, _sa
+    _sa = _open_to_all()  # mantido vivo junto com o mutex
+    _mutex = kernel32.CreateMutexW(ctypes.byref(_sa) if _sa else None, False, MUTEX_NAME)
+    err = ctypes.GetLastError()
+    return bool(_mutex) and err != ERROR_ALREADY_EXISTS
+
+
+def signal_show() -> bool:
+    """Pede para a cópia aberta mostrar a janela. False se não deu (cópia antiga, sem o evento)."""
+    h = kernel32.OpenEventW(EVENT_MODIFY_STATE, False, SHOW_EVENT)
+    if not h:
+        return False
+    ok = bool(kernel32.SetEvent(h))
+    kernel32.CloseHandle(h)
+    return ok
+
+
+def wait_show(callback, stopped) -> None:
+    """Na cópia aberta: chama callback() sempre que outra cópia pedir para mostrar a janela."""
+    sa = _open_to_all()
+    h = kernel32.CreateEventW(ctypes.byref(sa) if sa else None, False, False, SHOW_EVENT)  # reinicia sozinho
+    if not h:
+        return
+    while not stopped():
+        if kernel32.WaitForSingleObject(h, 1000) == 0:
+            callback()
 
 
 def message_box(text: str, title: str = "SmartGuardian") -> None:
@@ -151,6 +228,85 @@ def set_startup(enabled: bool) -> None:
                         "/delay", "0000:20"], capture_output=True, creationflags=NO_WINDOW)
     if r.returncode:
         raise RuntimeError(r.stderr.decode("cp850", "replace").strip() or "não foi possível criar a tarefa")
+
+
+# ---------- permissões da pasta do programa ----------
+# O app roda como administrador (e pode iniciar sozinho no login). Se usuários comuns podem alterar os
+# arquivos dele, qualquer programa sem administrador ganharia administrador editando um .py.
+_GROUPS = {"AU", "BU", "WD", "IU", "S-1-5-11", "S-1-5-32-545", "S-1-1-0", "S-1-5-4"}
+_WRITE_LETTERS = {"FA", "FW", "GA", "GW", "WD", "WO", "SD", "CC", "DC"}
+_WRITE_BITS = 0x2 | 0x4 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000  # gravar, acrescentar, apagar, DACL, dono, GA, GW
+
+
+def _sddl(path: Path) -> str:
+    sd, out = ctypes.c_void_p(), wintypes.LPWSTR()
+    if advapi32.GetNamedSecurityInfoW(str(path), 1, 0x4 | 0x1, None, None, None, None, ctypes.byref(sd)) != 0:  # DACL + dono
+        return ""
+    try:
+        if not advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 0x4 | 0x1, ctypes.byref(out), None):
+            return ""
+        return out.value
+    finally:
+        kernel32.LocalFree(sd)
+        if out:
+            kernel32.LocalFree(out)
+
+
+def folder_open_to_users(path: Path = ROOT) -> bool:
+    """True se usuários comuns (ou o dono sem administrador) podem alterar os arquivos da pasta."""
+    sddl = _sddl(path)
+    if not sddl:
+        return False
+    owner = re.search(r"O:([^:]+?)(?:G:|D:)", sddl)
+    # dono seguro: Administradores, SYSTEM ou serviço do Windows (TrustedInstaller e cia., S-1-5-80-*)
+    if owner and owner.group(1) not in ("BA", "SY", "S-1-5-32-544", "S-1-5-18") and not owner.group(1).startswith("S-1-5-80-"):
+        return True  # o dono pode mudar as permissões, com ou sem administrador
+    for rights, sid in re.findall(r"\(A;[^;]*;([^;]*);[^;]*;[^;]*;([^)]*)\)", sddl):
+        if sid not in _GROUPS:
+            continue
+        if rights.lower().startswith("0x"):
+            if int(rights, 16) & _WRITE_BITS:
+                return True
+        elif {rights[i:i + 2] for i in range(0, len(rights), 2)} & _WRITE_LETTERS:
+            return True
+    return False
+
+
+def protect_folder(path: Path = ROOT) -> None:
+    """Só Administradores e SYSTEM gravam; usuários leem e executam. Dono: Administradores.
+    Depois disso, atualizar (git pull, Instalar.bat) precisa de administrador."""
+    for args in (["/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"],
+                 ["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
+                  "*S-1-5-32-545:(OI)(CI)RX", "/T", "/C", "/Q"]):
+        r = subprocess.run(["icacls", str(path), *args], capture_output=True, creationflags=NO_WINDOW, timeout=300)
+        if r.returncode:
+            raise RuntimeError((r.stdout + r.stderr).decode("cp850", "replace").strip()[-300:] or "icacls falhou")
+
+
+# ---------- atalho no menu Iniciar ----------
+# Aponta para o pythonw do ambiente com o tray.py; aberto sem administrador, o próprio app pede (UAC).
+START_MENU_LNK = Path(os.environ["APPDATA"]) / r"Microsoft\Windows\Start Menu\Programs\SmartGuardian.lnk"
+
+
+def start_menu_enabled() -> bool:
+    return START_MENU_LNK.exists()
+
+
+def set_start_menu(enabled: bool) -> None:
+    if not enabled:
+        START_MENU_LNK.unlink(missing_ok=True)
+        return
+    ensure_ico()
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    ps = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:LNK);"
+          "$s.TargetPath=$env:TARGET;$s.Arguments=$env:ARGS;$s.WorkingDirectory=$env:WD;"
+          "$s.IconLocation=$env:ICON;$s.Description='SmartGuardian: guardião do PC';$s.Save()")
+    env = dict(os.environ, LNK=str(START_MENU_LNK), TARGET=str(pythonw), ARGS=f'"{ROOT / "tray.py"}"',
+               WD=str(ROOT), ICON=str(ICON_ICO))
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
+                       capture_output=True, creationflags=NO_WINDOW, timeout=30)
+    if r.returncode or not START_MENU_LNK.exists():
+        raise RuntimeError(r.stderr.decode("cp850", "replace").strip() or "não foi possível criar o atalho")
 
 
 # ---------- ícone: escudo de uma cor, como os ícones do sistema ----------
