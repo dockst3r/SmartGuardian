@@ -181,6 +181,80 @@ class Ports(unittest.TestCase):
         self.assertEqual(rules["bad_ports"], {4444})
 
 
+    def test_unsigned_listener_blocked_by_firewall_is_not_open_to_network(self):
+        listen = [Conn(1000, "TCP", "0.0.0.0", 8080, "", 0, "Escutando", "local", "blocked")]
+        s = R.score(proc(r"C:\Tools\server.exe", UNSIGNED), self.rules, listens=listen)
+        self.assertNotIn("listen_all", [r for r, _, _ in s.reasons])
+
+    def test_unsigned_listener_allowed_by_firewall_counts(self):
+        for exp in ("open", "lan", ""):  # "" = firewall não lido: conta como antes
+            listen = [Conn(1000, "TCP", "0.0.0.0", 8080, "", 0, "Escutando", "local", exp)]
+            s = R.score(proc(r"C:\Tools\server.exe", UNSIGNED), self.rules, listens=listen)
+            self.assertIn("listen_all", [r for r, _, _ in s.reasons], exp)
+
+    def test_bad_port_listener_alerts_even_if_blocked(self):
+        listen = [Conn(1000, "TCP", "0.0.0.0", 4444, "", 0, "Escutando", "local", "blocked")]
+        self.assertTrue(R.score(proc(r"C:\Tools\x.exe", UNSIGNED), self.rules, listens=listen).strong)
+
+
+class Firewall(unittest.TestCase):
+    """Porta escutando só é exposta se uma regra do firewall liberar (perfil ativo, protocolo, porta, programa)."""
+    PUBLIC = [{"t": 4, "on": True, "allow": 0}]
+    SVCHOST = r"C:\WINDOWS\system32\svchost.exe"
+
+    def exp(self, texts, proto="TCP", port=445, exe="", pid=4, laddr="0.0.0.0", profiles=PUBLIC, services=None):
+        from core import firewall as F
+        return F.exposure(F.inbound_allows(texts), profiles, proto=proto, port=port, exe=exe, pid=pid, laddr=laddr,
+                          services=services or {})
+
+    # legítimos: Windows padrão no perfil Público
+    def test_smb_rule_for_private_only_is_blocked_on_public(self):
+        rule = "v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|Profile=Private|LPort=445|RA4=LocalSubnet|App=System|"
+        self.assertEqual(self.exp([rule]), "blocked")
+
+    def test_disabled_rule_is_blocked(self):
+        self.assertEqual(self.exp(["v2.33|Action=Allow|Active=FALSE|Dir=In|Protocol=6|LPort=445|App=System|"]), "blocked")
+
+    def test_store_app_rule_does_not_open_the_pc(self):
+        rule = "v2.33|Action=Allow|Active=TRUE|Dir=In|Name=Game Bar|PFN=Microsoft.XboxGamingOverlay_8wekyb3d8bbwe|Edge=TRUE|"
+        self.assertEqual(self.exp([rule]), "blocked")
+
+    def test_wifi_direct_and_playto_rules_do_not_open_the_pc(self):
+        rules = ["v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|App=System|TTK2_27=WFDKmDriver|",
+                 "v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|Profile=Public|App=System|TTK2_27=UPnP|"]
+        self.assertEqual(self.exp(rules), "blocked")
+
+    def test_rpc_rule_for_domain_only(self):
+        rule = f"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|Profile=Domain|LPort=RPC|App={self.SVCHOST}|"
+        self.assertEqual(self.exp([rule], port=49666, exe=self.SVCHOST, pid=900), "blocked")
+
+    def test_loopback_is_pc(self):
+        self.assertEqual(self.exp([], port=1234, laddr="127.0.0.1"), "pc")
+
+    def test_mdns_service_rule_only_local(self):
+        rule = (f"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=17|LPort=5353|RA4=LocalSubnet|RA6=LocalSubnet|"
+                f"App=%SystemRoot%\\system32\\svchost.exe|Svc=dnscache|")
+        self.assertEqual(self.exp([rule], "UDP", 5353, self.SVCHOST, 900, services={"dnscache": {900}}), "lan")
+        self.assertEqual(self.exp([rule], "UDP", 5353, self.SVCHOST, 901, services={"dnscache": {900}}), "blocked")
+
+    # ataque: programa que se libera no firewall, ou firewall desligado
+    def test_program_with_allow_any_rule_is_open(self):
+        exe = rf"{HOME}\AppData\Roaming\upd\svc.exe"
+        rule = f"v2.33|Action=Allow|Active=TRUE|Dir=In|App={exe}|Name=Update|"
+        self.assertEqual(self.exp([rule], port=8443, exe=exe, pid=1000), "open")
+
+    def test_port_range_rule(self):
+        rule = "v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort2_10=4000-5000|"
+        self.assertEqual(self.exp([rule], port=4444, exe=r"C:\x.exe", pid=1000), "open")
+        self.assertEqual(self.exp([rule], port=5001, exe=r"C:\x.exe", pid=1000), "blocked")
+
+    def test_firewall_off_exposes_everything(self):
+        self.assertEqual(self.exp([], profiles=[{"t": 4, "on": False, "allow": 0}]), "open")
+
+    def test_unknown_profile_is_unknown(self):
+        self.assertEqual(self.exp([], profiles=[]), "")
+
+
 class EncodedCommand(unittest.TestCase):
     B64 = "SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA"
 

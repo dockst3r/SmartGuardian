@@ -8,13 +8,17 @@ e avisa quando algo foge do normal. Tem um assistente opcional que roda **no seu
 Fica como um ícone de escudo na bandeja, com janela no estilo do Windows 11. Mesma base do
 [SmartDevices](https://github.com/dockst3r/SmartDevices).
 
+![Visão geral do SmartGuardian: situação, CPU, memória, disco, rede, GPU, alertas e aparelhos na rede](docs/visao-geral.png)
+
+<sub>Print do app real; nomes de aparelhos, IPs e o nome do PC trocados por exemplos.</sub>
+
 ## O que ele faz
 
 | Tela | O que mostra |
 |---|---|
 | Visão geral | situação geral, CPU, memória, disco e rede da placa física (últimos 2 min); GPU com uso, VRAM, temperatura e folga até o limite térmico, potência, driver e quem está usando a placa; alertas recentes, aparelhos na rede |
 | Rede local | conexão, roteador, DNS, latência da internet; aparelhos da rede com IP, MAC, fabricante e quando apareceram; clique no nome para renomear |
-| Conexões | cada conexão de cada programa, com nome DNS; portas abertas neste PC; exportar CSV |
+| Conexões | cada conexão de cada programa, com nome DNS; portas abertas neste PC e **se o firewall deixa alguém alcançá-las**; exportar CSV |
 | Processos | assinatura digital, quem abriu, linha de comando, rede, uso de GPU e VRAM e **por que a pontuação**; Analisar com IA, Abrir local, VirusTotal, Encerrar, Quarentena, Isso é normal |
 | Inicialização | chaves Run, pasta Inicializar, serviços automáticos e tarefas agendadas; ligar e desligar sem apagar nada |
 | Alertas | histórico por dia; Ciente, Isso é normal, Pausar 1 hora, Resumir com IA |
@@ -61,6 +65,19 @@ mostra um aviso; em **Configurações → Proteger a pasta**, só administradore
 arquivos. Depois disso, para atualizar, use o `Instalar.bat` (ele pede administrador) ou um terminal
 como administrador para o `git pull`.
 
+A proteção grava as permissões só na pasta raiz; o resto herda. O perfil do WebView2 (o motor da
+janela) fica fora dela, em `%LOCALAPPDATA%\SmartGuardian\webview`, porque parte dos processos do
+WebView2 roda sem administrador e precisa gravar ali (dentro da pasta protegida a janela abria preta).
+Ao abrir, o app encerra os processos do WebView2 que tenham sobrado de uma execução que caiu, e que
+travariam esse perfil.
+
+Se uma versão antiga do app deixou os arquivos sem nenhuma permissão (nem administrador abre), rode
+num terminal como administrador:
+
+```
+icacls "C:\SmartGuardian\*" /reset /T /C
+```
+
 Por que não um `.exe`? Para um programa de segurança que roda como administrador, poder ler o código
 antes de rodar é uma vantagem; um `.exe` sem assinatura digital pedindo administrador é justamente o
 que o próprio app ensina a desconfiar, e empacotadores como o PyInstaller costumam gerar alarme falso
@@ -81,7 +98,7 @@ partir de 60. Pesos e listas ficam em `rules.json`, criado na primeira execuçã
 | Pasta temporária ou gravável por qualquer usuário · assinatura quebrada · comando codificado · Office abrindo terminal · GPU acima de 50 % por ~15 s sem assinatura válida (perfil de minerador) | 25 |
 | Sem assinatura digital | 20 |
 | Pasta do usuário (AppData, ProgramData) · Downloads | 15 |
-| Processo pai errado · sem assinatura e na internet · porta aberta para a rede | 10 |
+| Processo pai errado · sem assinatura e na internet · porta aberta para a rede (só se o firewall liberar) | 10 |
 | Programa novo depois do aprendizado · sem assinatura em pasta protegida | 5 |
 
 ### Contra falso positivo
@@ -136,7 +153,7 @@ Hotspot e temperatura da memória não existem na API oficial para placas GeForc
 
 A cada pergunta vai junto um resumo em texto do estado do PC: processos com pontuação e motivos,
 programas sem assinatura, os que mais usam CPU e memória, GPU e quem a usa, conexões com a internet,
-portas abertas, aparelhos da rede (inclusive os que saíram), inicialização, alertas e a sua lista de
+portas abertas (separando as que o firewall libera das que só estão escutando, bloqueadas), aparelhos da rede (inclusive os que saíram), inicialização, alertas e a sua lista de
 confiança. O modelo é instruído a tratar esses textos só como dados (um programa malicioso pode
 escrever instruções na própria linha de comando). A parte da conversa enviada junto se ajusta ao
 contexto com que o LM Studio carregou o modelo: 4.000 caracteres em modelos de 8K, até 60.000 nos de 100K+. As conversas ficam salvas no banco local, e cada resposta mostra qual modelo respondeu e
@@ -168,6 +185,9 @@ Só o que você ligar:
 - **Lista de fabricantes do IEEE:** baixada uma vez para `data/oui.csv`.
 
 A varredura da rede só manda ping e lê a tabela ARP do Windows; não abre portas nos aparelhos.
+Para as portas abertas, o app lê as regras do firewall no registro e o perfil da rede (Pública,
+Privada, Domínio); não muda nenhuma regra. Porta escutando com o firewall ligado e sem regra que a
+libere aparece como "Bloqueada pelo firewall" e não conta na pontuação.
 O card de rede conta só as placas físicas ligadas (VPN e adaptadores virtuais ficam de fora, para não
 contar o mesmo tráfego duas vezes) e bate com o contador do Windows dentro de 1 a 3%.
 Banco, configurações, log, relatórios e quarentena ficam na pasta do programa e estão no `.gitignore`.
@@ -178,12 +198,12 @@ Banco, configurações, log, relatórios e quarentena ficam na pasta do programa
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-39 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
+53 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
 verdadeiro, instalador assinado em Temp, certificado vencido, jogo e LM Studio com GPU a 100 %);
 ataques que **precisam** avisar (svchost falso em Temp e em `C:\Windows\Tasks`, porta 4444, AppData
 sem assinatura na internet, Word abrindo PowerShell codificado, assinatura adulterada, minerador em
 AppData, `powershell` com qualquer abreviação de `-EncodedCommand`); portas (conexão que chega e
-loopback não contam, porta temporária nunca é "porta de invasão"); as proteções de Encerrar e
+loopback não contam, porta temporária nunca é "porta de invasão"); firewall (regra de app da Store, Wi-Fi Direct e perfil inativo não expõem porta; firewall desligado expõe tudo); as proteções de Encerrar e
 Quarentena (testadas sem encerrar nem mover nada, inclusive PID reaproveitado e o próprio Python);
 a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histórico enviado à IA.
 
@@ -194,9 +214,9 @@ a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histór
                          |
  Núcleo         core/guard.py   laços de coleta, pontuação, alertas, ações, contexto da IA, relatório
                 /        |          |            |              \
- Coletores   system.py  gpu.py      procs.py  conns.py   lan.py       startup.py
-             CPU/mem    NVML + uso  processos conexões   ping, ARP,   Run, pasta, serviços,
-             disco/rede por programa (psutil)  DNS rev.   fabricante   tarefas agendadas
+ Coletores   system.py  gpu.py      procs.py  conns.py   firewall.py  lan.py       startup.py
+             CPU/mem    NVML + uso  processos conexões   regras e     ping, ARP,   Run, pasta, serviços,
+             disco/rede por programa (psutil)  DNS rev.   perfil ativo fabricante   tarefas agendadas
                          |
  Análise        signature.py (WinVerifyTrust)   rules.py (pontuação)   ai.py (LM Studio)   vt.py
                          |
@@ -210,7 +230,9 @@ a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histór
 | `ui/api.py` | funções que a janela chama no Python (perguntas à IA rodam em segundo plano) |
 | `ui/win.py` | detalhes do Windows: ícone, administrador, instância única, atalho no menu Iniciar, iniciar com o Windows, tema |
 | `Instalar.bat` | instala ou atualiza: ambiente, bibliotecas, atalho no menu Iniciar |
+| `core/firewall.py` | se uma porta aberta é alcançável: regras do firewall (registro), perfil ativo, programa e serviço |
 | `docs/prototipo.html` | protótipo navegável da interface, com dados de exemplo |
+| `docs/visao-geral.png` | print da Visão geral (dados identificáveis trocados por exemplos) |
 
 ## Limitações conhecidas
 

@@ -174,7 +174,8 @@ def score(proc, rules: dict, *, conns=(), listens=(), new_exe: bool = False, gpu
     if bad:
         s.add(rules, "bad_port", port=bad)
     if not trusted:
-        open_all = next((c.lport for c in listens if c.laddr in ("0.0.0.0", "::")), None)
+        # porta que o firewall bloqueia não é "aberta para a rede"; sem leitura do firewall (""), conta como antes
+        open_all = next((c.lport for c in listens if c.laddr in ("0.0.0.0", "::") and c.exposure != "blocked"), None)
         if open_all:
             s.add(rules, "listen_all", port=open_all)
     if new_exe:

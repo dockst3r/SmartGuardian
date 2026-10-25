@@ -23,9 +23,23 @@ sys.path.insert(0, str(ROOT))
 
 if sys.stderr is None:  # pythonw não tem console
     sys.stdout = sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
+
+
+def _log_handler() -> logging.Handler:
+    # Com a pasta protegida, a cópia aberta sem administrador (atalho do menu Iniciar, antes do UAC) não grava
+    # o log ali; sem isto ela morria calada e o app "não abria". Ela só pede o UAC: log vai para o LOCALAPPDATA.
+    try:
+        return RotatingFileHandler(ROOT / "smartguardian.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    except OSError:
+        alt = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP", ".")) / "SmartGuardian"
+        alt.mkdir(parents=True, exist_ok=True)
+        return RotatingFileHandler(alt / "smartguardian-sem-admin.log", maxBytes=200_000, backupCount=1, encoding="utf-8")
+
+
 logging.basicConfig(
     level=logging.DEBUG if os.environ.get("SG_DEBUG") else logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    handlers=[RotatingFileHandler(ROOT / "smartguardian.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")],
+    handlers=[_log_handler()],
 )
 log = logging.getLogger("smartguardian")
 
@@ -180,7 +194,14 @@ class App:
     def run(self) -> None:
         self.icon.run_detached()
         self.refresh_icon()
-        webview.start(self._started, private_mode=False, storage_path=str(ROOT / "data" / "webview"))
+        # Perfil do WebView2 fora da pasta do programa: parte dos processos dele roda sem administrador e precisa
+        # gravar ali. Com a pasta protegida (só administrador grava), a janela abria preta e depois nem abria
+        # (0x800700AA). Ali só ficam cache e a última aba/conversa aberta.
+        storage = Path(os.environ.get("LOCALAPPDATA") or ROOT / "data") / "SmartGuardian" / "webview"
+        if n := win.kill_orphan_webviews(storage):
+            log.warning("encerrados %d processos WebView2 que sobraram da última execução", n)
+            time.sleep(1)  # o Windows solta o perfil logo depois
+        webview.start(self._started, private_mode=False, storage_path=str(storage))
 
     def quit(self) -> None:
         if self._quitting:

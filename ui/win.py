@@ -102,6 +102,23 @@ def single_instance() -> bool:
     return bool(_mutex) and err != ERROR_ALREADY_EXISTS
 
 
+def kill_orphan_webviews(storage: Path) -> int:
+    """WebView2 que sobrou de uma cópia que caiu ou foi encerrada à força segura o perfil, e a próxima abertura
+    falha com 0x800700AA (janela preta ou nada). Só chame com o single_instance() na mão: aí nenhum outro
+    SmartGuardian usa esse perfil. Encerra só os msedgewebview2 com --user-data-dir dentro de `storage`."""
+    import psutil
+    mark = str(storage).lower()
+    n = 0
+    for p in psutil.process_iter(["name", "cmdline"]):
+        try:
+            if (p.info["name"] or "").lower() == "msedgewebview2.exe" and mark in " ".join(p.info["cmdline"] or []).lower():
+                p.kill()
+                n += 1
+        except psutil.Error:
+            continue
+    return n
+
+
 def signal_show() -> bool:
     """Pede para a cópia aberta mostrar a janela. False se não deu (cópia antiga, sem o evento)."""
     h = kernel32.OpenEventW(EVENT_MODIFY_STATE, False, SHOW_EVENT)
@@ -274,13 +291,19 @@ def folder_open_to_users(path: Path = ROOT) -> bool:
 
 def protect_folder(path: Path = ROOT) -> None:
     """Só Administradores e SYSTEM gravam; usuários leem e executam. Dono: Administradores.
-    Depois disso, atualizar (git pull, Instalar.bat) precisa de administrador."""
-    for args in (["/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"],
-                 ["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
-                  "*S-1-5-32-545:(OI)(CI)RX", "/T", "/C", "/Q"]):
-        r = subprocess.run(["icacls", str(path), *args], capture_output=True, creationflags=NO_WINDOW, timeout=300)
+    Depois disso, atualizar (git pull, Instalar.bat) precisa de administrador.
+    As permissões ficam só na pasta raiz e o resto herda. Não use /inheritance:r com /T: em arquivo, (OI)(CI)
+    não vale, o grant não entra e o arquivo fica sem nenhuma permissão (nem administrador abre)."""
+    for target, args in ((path, ["/setowner", "*S-1-5-32-544", "/T", "/C", "/Q"]),
+                         (path, ["/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
+                                 "*S-1-5-32-545:(OI)(CI)RX", "/Q"]),
+                         (path / "*", ["/reset", "/T", "/C", "/Q"])):
+        r = subprocess.run(["icacls", str(target), *args], capture_output=True, creationflags=NO_WINDOW, timeout=300)
         if r.returncode:
             raise RuntimeError((r.stdout + r.stderr).decode("cp850", "replace").strip()[-300:] or "icacls falhou")
+    if "(A;" not in _sddl(path / "tray.py"):
+        raise RuntimeError("os arquivos ficaram sem permissão; rode no terminal como administrador: "
+                           f'icacls "{path}\\*" /reset /T /C')
 
 
 # ---------- atalho no menu Iniciar ----------

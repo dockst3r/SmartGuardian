@@ -417,7 +417,7 @@ function banners() {
 function metrics() {
   const S = st.data.system, h = S.hist, last = a => a.length ? a[a.length - 1] : 0;
   return `<div class="grid g4">
-    <div class="card metric"><div class="lbl"><span>Processador</span><span title="${esc(S.cpu_name)}">${esc(S.cpu_name.replace(/\s*\d+-Core Processor|\(R\)|\(TM\)/g, ""))}</span></div><div class="val">${fmtN(last(h.cpu), 0)}<small> %</small></div>${spark(h.cpu, 100)}</div>
+    <div class="card metric"><div class="lbl"><span>CPU</span><span title="${esc(S.cpu_name)}">${esc(S.cpu_name.replace(/\s*\d+-Core Processor|\(R\)|\(TM\)/g, ""))}</span></div><div class="val">${fmtN(last(h.cpu), 0)}<small> %</small></div>${spark(h.cpu, 100)}</div>
     <div class="card metric"><div class="lbl"><span>Memória</span><span>${fmtB(S.mem_total)}</span></div><div class="val">${fmtB(S.mem_used)}<small> · ${fmtN(last(h.mem), 0)} %</small></div>${spark(h.mem, 100)}</div>
     <div class="card metric"><div class="lbl"><span>Disco ${esc(S.drive)}</span><span>${fmtB(S.disk_total)}</span></div><div class="val">${fmtB(S.disk_used)}<small> · ${fmtN(last(h.disk), 0)} %</small></div>${spark(h.disk, 100)}</div>
     <div class="card metric"><div class="lbl"><span>Rede</span><span>↑ ${fmtN(last(h.up))} Mb/s</span></div><div class="val">${fmtN(last(h.down))}<small> Mb/s ↓</small></div>${spark(h.down)}</div></div>`;
@@ -488,10 +488,19 @@ V.lan = () => {
   <p class="sub">A varredura só manda um ping para cada endereço e lê a tabela ARP do Windows; não abre portas nos aparelhos. Clique no nome de um aparelho para mudar; Enter salva, Esc cancela. Celulares com MAC aleatório aparecem como "MAC aleatório".</p>`;
 };
 
+// Escutando não é exposto: o firewall decide (core/firewall.py). "" = firewall não lido, vale o jeito antigo.
+const EXP_RANK = { open: 4, lan: 3, "": 2, blocked: 1, pc: 0 };
+const portInfo = l => l.bad_port ? ["bad", "Porta usada por ferramentas de invasão"]
+  : l.scope === "pc" || l.exposure === "pc" ? ["ok", "Só este PC"]
+  : l.exposure === "blocked" ? ["ok", "Bloqueada pelo firewall"]
+  : l.exposure === "open" ? ["warn", "Liberada no firewall para qualquer endereço"]
+  : l.exposure === "lan" ? ["info", "Liberada no firewall só para a rede local"]
+  : l.all ? ["warn", "Aberta para toda a rede"] : ["info", "Só numa interface"];
+
 V.conns = () => {
   const d = st.data;
   const rows = d.conns.filter(c => st.connFilter === "all" || c.scope === "internet").sort((a, b) => b.score - a.score || (b.bad_port - a.bad_port) || a.proc.localeCompare(b.proc));
-  const ls = [...d.listens].sort((a, b) => (b.bad_port - a.bad_port) || (a.scope === "pc") - (b.scope === "pc") || a.port - b.port);
+  const ls = [...d.listens].sort((a, b) => (b.bad_port - a.bad_port) || (EXP_RANK[b.exposure] ?? 1) - (EXP_RANK[a.exposure] ?? 1) || a.port - b.port);
   const SC = { internet: "Internet", local: "Rede local", pc: "Este PC" };
   return `<div class="vhead"><div><h2>Conexões</h2><p class="sub">${d.conns.length} conexões de ${new Set(d.conns.map(c => c.pid)).size} programas · atualiza a cada ${st.data.interval} s</p></div>
     <button class="btn" data-act="export">Exportar CSV</button></div>
@@ -507,7 +516,7 @@ V.conns = () => {
       <td class="mono">${esc(c.raddr)}:${c.rport}${c.bad_port ? ' <span class="pill bad">porta suspeita</span>' : ""}</td>
       <td>${SC[c.scope]}</td><td>${esc(c.state)}</td><td>${scoreCell(c.score, c.sev)}</td></tr>`).join("") || '<tr><td colspan="6" class="muted">Nenhuma conexão neste filtro.</td></tr>'}</tbody></table></div>
   <div class="card"><h3>Portas abertas neste PC <small>quem pode se conectar ao seu computador</small></h3><div class="list">
-    ${ls.map(l => `<div class="row link" data-proc="${l.pid}"><span class="sev ${l.bad_port ? "bad" : l.scope === "pc" ? "ok" : l.all ? "warn" : "info"}"></span><div class="grow"><b class="mono">${esc(l.proto)} ${esc(l.addr)}:${l.port}</b><span>${esc(l.proc)} · PID ${l.pid}</span></div><span class="muted" style="font-size:12.5px">${l.bad_port ? "Porta usada por ferramentas de invasão" : l.scope === "pc" ? "Só este PC" : l.all ? "Aberta para toda a rede" : "Só numa interface"}</span></div>`).join("") || '<div class="empty">Nenhuma porta TCP aberta.</div>'}
+    ${ls.map(l => { const [sev, txt] = portInfo(l); return `<div class="row link" data-proc="${l.pid}"><span class="sev ${sev}"></span><div class="grow"><b class="mono">${esc(l.proto)} ${esc(l.addr)}:${l.port}</b><span>${esc(l.proc)} · PID ${l.pid}</span></div><span class="muted" style="font-size:12.5px">${txt}</span></div>`; }).join("") || '<div class="empty">Nenhuma porta TCP aberta.</div>'}
   </div></div>`;
 };
 

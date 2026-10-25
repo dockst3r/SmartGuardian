@@ -24,6 +24,7 @@ class Conn:
     rport: int
     state: str
     scope: str   # internet, local, pc
+    exposure: str = ""   # só portas abertas: pc, blocked, lan, open ("" = firewall não lido); ver core.firewall
 
 
 def scope(ip: str) -> str:

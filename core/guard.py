@@ -26,7 +26,7 @@ from pathlib import Path
 
 import psutil
 
-from . import ai, conns as C, lan, procs as P, rules as R, startup, vt
+from . import ai, conns as C, firewall, lan, procs as P, rules as R, startup, vt
 from .gpu import Gpu, GpuProcesses
 from .system import System
 
@@ -74,6 +74,7 @@ class Guard:
         self._check_lock = threading.Lock()   # "Verificar agora" e o laço de 5 s não rodam ao mesmo tempo
         self._alert_lock = threading.Lock()   # consulta + insert do alerta sem duplicar
         self.resolver = C.Resolver()
+        self.firewall = firewall.Firewall()
         self.lock = threading.RLock()
         self.listeners: list = []          # fn(title, text, sev): notificações
         self.on_change: list = []          # fn(): algo mudou (ícone, painel)
@@ -219,10 +220,14 @@ class Guard:
     def _check_processes(self) -> None:
         procs = P.snapshot()
         conns, listens = C.snapshot()
+        self.firewall.refresh()
+        exe_of = {p.pid: p.exe for p in procs}
         by_pid_c, by_pid_l = defaultdict(list), defaultdict(list)
         for c in conns:
             by_pid_c[c.pid].append(c)
         for c in listens:
+            c.exposure = self.firewall.exposure(proto=c.proto, port=c.lport, exe=exe_of.get(c.pid, ""), pid=c.pid,
+                                                laddr=c.laddr)
             by_pid_l[c.pid].append(c)
 
         cores = psutil.cpu_count() or 1
@@ -321,7 +326,8 @@ class Guard:
                          "raddr": c.raddr, "rport": c.rport, "host": host, "state": c.state, "scope": c.scope,
                          "score": s, "sev": sv, "bad_port": c.rport in self.rules["bad_ports"]})
         lrow = [{"pid": c.pid, "proc": names.get(c.pid, "System" if c.pid == 4 else "?"), "addr": c.laddr, "port": c.lport, "proto": c.proto,
-                 "scope": c.scope, "all": c.laddr in ("0.0.0.0", "::"), "bad_port": c.lport in self.rules["bad_ports"]}
+                 "scope": c.scope, "all": c.laddr in ("0.0.0.0", "::"), "bad_port": c.lport in self.rules["bad_ports"],
+                 "exposure": c.exposure}
                 for c in listens]
         with self.lock:
             self.procs, self.conns, self.listens = rows, crow, lrow
@@ -667,19 +673,35 @@ class Guard:
         if not net:
             lines.append("  nenhuma")
 
+        # Escutando não é exposto: com o firewall ligado, só passa o que uma regra libera. Sem isso a IA
+        # tratava 135/445/RPC do Windows, bloqueados no perfil Público, como portas abertas para a internet.
+        rank = {"open": 3, "lan": 2, "": 1, "blocked": 0}
         ports = {}
         for l in listens:
-            if l["scope"] == "pc":
+            if l["scope"] == "pc" or l.get("exposure") == "pc":
                 continue
             k = (l["proc"], f"{l['proto']} {l['port']}")
-            ports.setdefault(k, {"all": False, "bad": l["bad_port"], "pid": l["pid"]})
-            ports[k]["all"] |= l["all"]
-        lines.append("\nPORTAS ABERTAS PARA A REDE (quem pode se conectar a este PC):")
-        for (proc, port), v in sorted(ports.items(), key=lambda kv: (not kv[1]["bad"], int(kv[0][1].split()[1]))):
-            lines.append(f"  porta {port} · {proc} ({_sig_short(by_pid.get(v['pid']) or {'pid': v['pid'], 'name': proc})}) · "
-                         f"{'todas as interfaces' if v['all'] else 'só uma interface'}{' · PORTA USADA POR INVASÃO' if v['bad'] else ''}")
-        if not ports:
-            lines.append("  nenhuma")
+            v = ports.setdefault(k, {"bad": l["bad_port"], "pid": l["pid"], "exp": "blocked"})
+            if rank[l.get("exposure", "")] > rank[v["exp"]]:
+                v["exp"] = l.get("exposure", "")
+        key = lambda kv: (not kv[1]["bad"], int(kv[0][1].split()[1]))
+        reach = {"open": "liberada para qualquer endereço", "lan": "liberada só para a rede local",
+                 "": "firewall não lido"}
+        prof = self.firewall.profile_name()
+        lines.append("\nPORTAS ABERTAS NESTE PC" + (f" (rede atual: {prof}; firewall ligado, entrada sem regra é bloqueada)"
+                                                    if prof else "") + ":")
+        lines.append("  Alcançáveis de outro aparelho:")
+        reachable = [kv for kv in sorted(ports.items(), key=key) if kv[1]["exp"] != "blocked"]
+        for (proc, port), v in reachable:
+            lines.append(f"    porta {port} · {proc} ({_sig_short(by_pid.get(v['pid']) or {'pid': v['pid'], 'name': proc})}) · "
+                         f"{reach[v['exp']]}{' · PORTA USADA POR INVASÃO' if v['bad'] else ''}")
+        if not reachable:
+            lines.append("    nenhuma")
+        blocked = [f"{port} {proc}" + (" (PORTA USADA POR INVASÃO)" if v["bad"] else "")
+                   for (proc, port), v in sorted(ports.items(), key=key) if v["exp"] == "blocked"]
+        if blocked:
+            lines.append("  Escutando, mas BLOQUEADAS pelo firewall (ninguém de fora alcança; não são risco de rede): "
+                         + ", ".join(blocked))
 
         status_pt = {"open": "aberto", "learning": "registrado no aprendizado", "dismissed": "visto pelo usuário",
                      "normal": "usuário marcou como normal"}
