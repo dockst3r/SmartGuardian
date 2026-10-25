@@ -23,7 +23,8 @@ DEFAULTS = {
                "gpu_temp": True, "vram": False},
     "close_to_tray": True,
     "public_ip": False,          # consulta api.ipify.org; desligado para nada sair do PC sem você pedir
-    "ai": {"enabled": False, "url": "http://localhost:1234/v1", "model": "", "auto": False},
+    "ai": {"enabled": False, "url": "http://localhost:1234/v1", "model": "", "auto": False,
+           "detail": "tecnico", "tools": True},  # detail: tecnico | simples; tools: funil com ferramentas
     "vt_key": "",
     "tray_promoted": False,
 }
@@ -92,6 +93,7 @@ create table if not exists meta(k text primary key, v text);
 create table if not exists chats(id integer primary key, ts real, title text);
 create table if not exists chat_msgs(id integer primary key, chat_id integer, ts real, role text, content text, err integer default 0);
 create index if not exists chat_msgs_chat on chat_msgs(chat_id);
+create table if not exists optimize_log(id integer primary key, ts real, item text, label text, freed integer, files integer, skipped integer, error text);
 """
 
 
@@ -101,7 +103,7 @@ class Db:
         self.con = sqlite3.connect(path, check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
-        for col in ("model text", "secs real"):  # colunas acrescentadas depois; bancos antigos ganham aqui
+        for col in ("model text", "secs real", "tools text"):  # colunas acrescentadas depois; bancos antigos ganham aqui
             try:
                 self.con.execute(f"alter table chat_msgs add column {col}")
             except sqlite3.OperationalError:

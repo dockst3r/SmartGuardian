@@ -199,6 +199,28 @@ td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .msg.ai { background: var(--card); border: 1px solid var(--line); }
 .msg.err { background: var(--bad-bg); }
 .msg .who { font-size: 11.5px; color: var(--ink-2); margin-bottom: 4px; display: flex; gap: 6px; align-items: center; white-space: normal; }
+/* respostas da IA em Markdown: títulos, listas, tabelas e blocos de comando */
+.msg.ai { max-width: min(920px, 92%); white-space: normal; line-height: 1.55; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 8px; }
+.md h4 { font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md ul, .md ol { margin: 0 0 8px; padding-left: 20px; } .md li { margin: 2px 0; }
+.md pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; overflow-x: auto; white-space: pre; font: 12.5px/1.45 Consolas, "Cascadia Mono", monospace; user-select: text; }
+.md code { font: 12.5px Consolas, "Cascadia Mono", monospace; background: var(--hover); padding: 0 4px; border-radius: 3px; }
+.md table { border-collapse: collapse; margin: 4px 0 10px; font-size: 12.5px; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.md th { background: var(--hover); font-weight: 600; }
+.tools-used { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-2); align-items: center; }
+.tools-used span { background: var(--hover); border-radius: 10px; padding: 1px 8px; }
+.steps { display: grid; gap: 3px; margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+/* otimização */
+.opt-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--line); }
+.opt-row:first-child { border-top: 0; }
+.opt-row input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.opt-row .grow span { display: block; color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+.opt-size { font-weight: 600; white-space: nowrap; text-align: right; min-width: 90px; }
+.opt-size small { display: block; font-weight: 400; color: var(--ink-2); font-size: 11.5px; }
 .composer { display: flex; gap: 8px; align-items: center; background: var(--card); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 6px 6px 12px; }
 .composer input { flex: 1; border: 0; background: transparent; outline: none; padding: 6px 0; min-width: 0; }
 .dots::after { content: "…"; animation: dots 1.2s steps(4) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
@@ -278,6 +300,7 @@ const I = {
   edit: '<path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5v-3z"/>',
   box: '<path d="M2 5 8 2l6 3v6l-6 3-6-3zM2 5l6 3 6-3M8 8v6"/>',
   pause: '<path d="M5.5 3v10M10.5 3v10"/>',
+  zap: '<path d="M9 1.5 3 9h4.5L7 14.5 13 7H8.5z"/>',
   trash: '<path d="M2.5 4h11M6 4V2.5h4V4M3.8 4l.7 9.5h7l.7-9.5M6.5 6.5v4.5M9.5 6.5v4.5"/>',
 };
 const ic = (k, cls = "i") => `<svg class="${cls}" viewBox="0 0 16 16">${I[k] || I.pc}</svg>`;
@@ -285,12 +308,13 @@ const ic = (k, cls = "i") => `<svg class="${cls}" viewBox="0 0 16 16">${I[k] || 
 const NAV = [
   ["overview", "Visão geral", "home"], ["lan", "Rede local", "net", "lan"], ["conns", "Conexões", "conn"],
   ["procs", "Processos", "proc", "proc"], ["startup", "Inicialização", "apps", "startup"], ["alerts", "Alertas", "bell", "all"],
-  ["sep"], ["ai", "Assistente IA", "ai"], ["grow"], ["settings", "Configurações", "gear"],
+  ["optimize", "Otimização", "zap"], ["sep"], ["ai", "Assistente IA", "ai"], ["grow"], ["settings", "Configurações", "gear"],
 ];
-const MANUAL = new Set(["settings", "ai"]);  // telas que não se redesenham sozinhas (têm campos sendo editados)
+const MANUAL = new Set(["settings", "ai", "optimize"]);  // telas que não se redesenham sozinhas (têm campos sendo editados)
 
 const st = { view: "overview", visible: true, data: null, pick: null, procFilter: "attn", procQuery: "", lanFilter: "all",
-             connFilter: "internet", startupHideWin: true, startupOnlyNew: false, chat: [], chats: [], chatId: null, aiBusy: false, aiStatus: null, busy: false, editing: null };
+             connFilter: "internet", startupHideWin: true, startupOnlyNew: false, chat: [], chats: [], chatId: null, aiBusy: false, aiStatus: null, busy: false, editing: null,
+             aiSteps: [], optSel: null, optBusy: "", optStep: "", optLast: null };
 try { st.chatId = +localStorage.getItem("sg.chat") || null; } catch (e) {}
 try { const v = localStorage.getItem("sg.view"); if (v) st.view = v; } catch (e) {}
 
@@ -612,6 +636,56 @@ V.alerts = () => {
     </div>`).join("")}</div></div>`).join("") || '<div class="card"><div class="empty">Nenhum alerta ainda. Quando algo fugir do normal, aparece aqui.</div></div>'}`;
 };
 
+/* ---------------- otimização ---------------- */
+// marcados: o que o usuário escolheu, ou os itens "padrão" que têm algo para limpar
+const optSelected = () => st.optSel || new Set(((st.data.optimize || {}).items || []).filter(x => x.default && x.size > 0).map(x => x.id));
+async function optRun(fn, ...args) {
+  if (st.optBusy) return;
+  let r;
+  try { r = await call(fn, ...args); } catch (e) { return; }
+  st.optBusy = fn === "opt_clean" ? "Limpando" : "Analisando"; st.optStep = ""; render();
+  try {
+    for (let i = 0; i < 3600; i++) {
+      await new Promise(res => setTimeout(res, 800));
+      const j = await window.pywebview.api.opt_job(r.job);
+      if (j.done) {
+        if (j.error) toast("Não deu certo", j.error, true);
+        if (j.result) {
+          st.optLast = j.result; st.optSel = null;
+          const freed = j.result.reduce((a, x) => a + x.freed, 0), errs = j.result.filter(x => x.error);
+          toast(`Liberados ${fmtB(freed)}`, errs.length ? `${errs.length} item(ns) com erro: ${errs.map(x => x.label).join(", ")}` : "Arquivos em uso ficaram onde estavam.", errs.length > 0);
+        }
+        break;
+      }
+      if (j.step && j.step !== st.optStep) { st.optStep = j.step; if (st.view === "optimize") render(); }
+    }
+  } finally { st.optBusy = ""; st.optStep = ""; await load(true); }
+}
+
+V.optimize = () => {
+  const o = st.data.optimize || { items: [], insights: [], history: [], not_done: [], ts: 0 }, sel = optSelected();
+  if (!o.ts && !st.optBusy && !st.optAuto) { st.optAuto = true; setTimeout(() => optRun("opt_analyze"), 0); }  // primeira visita: mede sozinho (não apaga nada)
+  const chosen = o.items.filter(x => sel.has(x.id)), total = chosen.reduce((a, x) => a + (x.known ? x.size : 0), 0);
+  const all = o.items.reduce((a, x) => a + (x.known ? x.size : 0), 0);
+  const busy = !!st.optBusy, aiOn = st.data.ai && st.data.ai.enabled;
+  const SEVI = { bad: "bad", warn: "warn", info: "info" };
+  return `<div class="vhead"><div><h2>Otimização</h2><p class="sub">${o.ts ? `Análise de ${hm(o.ts)} · ${fmtB(all)} no total, ${fmtB(total)} marcados` : "Medindo…"} · analisar nunca apaga nada; limpar só o que você marcar e confirmar</p></div>
+    <div class="btn-row">${aiOn ? `<button class="btn" data-act="opt-ai" ${busy ? "disabled" : ""}>${ic("ai")}Pedir sugestões à IA</button>` : ""}
+      <button class="btn" data-act="opt-analyze" ${busy ? "disabled" : ""}>${ic("refresh")}Analisar de novo</button></div></div>
+  ${busy ? `<div class="banner info">${ic("zap")}<span><b>${esc(st.optBusy)}…</b> ${esc(st.optStep)}</span></div>` : ""}
+  ${o.insights.length ? `<div class="card"><h3>Sugestões a partir dos sensores <small>só leitura: o app não mexe nisso sozinho</small></h3><div class="list">${o.insights.map(i => `
+    <div class="row"><span class="sev ${SEVI[i.sev] || "info"}"></span><div class="grow"><b>${esc(i.title)}</b><span style="white-space:normal">${esc(i.detail)} <b>${mdInline(i.action)}</b></span></div></div>`).join("")}</div></div>` : ""}
+  <div class="card"><h3>O que dá para limpar <small><button class="btn small" data-act="opt-default" ${busy ? "disabled" : ""}>Recomendados</button> <button class="btn small" data-act="opt-all" ${busy ? "disabled" : ""}>Marcar tudo</button></small></h3>
+    ${o.items.map(x => `<label class="opt-row"><input type="checkbox" data-opt="${x.id}" ${sel.has(x.id) ? "checked" : ""} ${busy || (x.known && !x.size) ? "disabled" : ""}>
+      <div class="grow"><b>${esc(x.label)}</b>${x.default ? "" : ' <span class="pill mute" style="display:inline-flex">opcional</span>'}<span>${esc(x.desc)}</span></div>
+      <div class="opt-size">${x.known ? fmtB(x.size) : "—"}<small>${x.known ? `${x.count.toLocaleString("pt-BR")} arquivo${x.count === 1 ? "" : "s"}` : "tamanho ao terminar"}</small></div></label>`).join("") || '<div class="empty">Medindo…</div>'}
+    <div class="btn-row" style="margin-top:12px;justify-content:flex-end"><button class="btn primary" data-act="opt-clean" ${busy || !chosen.length ? "disabled" : ""}>${ic("zap")}Limpar ${chosen.length ? `${chosen.length} ite${chosen.length === 1 ? "m" : "ns"} (${fmtB(total)}${chosen.some(x => !x.known) ? " +" : ""})` : ""}</button></div></div>
+  ${st.optLast ? `<div class="card"><h3>Última limpeza</h3><div class="list">${st.optLast.map(r => `<div class="row"><span class="sev ${r.error ? "bad" : "ok"}"></span><div class="grow"><b>${esc(r.label)}</b><span>${r.error ? esc(r.error) : `${fmtB(r.freed)} · ${r.files} arquivos${r.skipped ? ` · ${r.skipped} em uso, mantidos` : ""} · ${fmtN(r.secs, 1)} s`}</span></div></div>`).join("")}</div></div>` : ""}
+  <div class="card"><h3>O que o SmartGuardian não faz, de propósito</h3><div class="list">${o.not_done.map(([n, w]) => `<div class="row"><span class="sev info"></span><div class="grow"><b>${esc(n)}</b><span style="white-space:normal">${esc(w)}</span></div></div>`).join("")}</div></div>
+  ${o.history.length ? `<div class="card"><h3>Histórico de limpezas</h3><div class="tbl-wrap"><table><thead><tr><th>Quando</th><th>Item</th><th class="r">Liberado</th><th class="r">Arquivos</th></tr></thead><tbody>
+    ${o.history.map(h => `<tr><td>${new Date(h.ts * 1000).toLocaleDateString("pt-BR")} ${hm(h.ts)}</td><td>${esc(h.label)}${h.error ? ` <span class="pill bad">${esc(h.error)}</span>` : ""}</td><td class="r num">${fmtB(h.freed)}</td><td class="r num">${h.files}</td></tr>`).join("")}</tbody></table></div></div>` : ""}`;
+};
+
 V.ai = () => {
   const cfg = st.data.ai, S = st.aiStatus;
   if (!cfg.enabled) return `<div class="vhead"><div><h2>Assistente IA</h2><p class="sub">Usa um modelo no LM Studio, neste PC. Nada é enviado para a internet.</p></div></div>
@@ -637,11 +711,11 @@ V.ai = () => {
         <button class="btn" data-act="report-ai">Relatório do dia</button>
       </div></div>
     <div class="msgs" id="msgs">${st.chat.length ? st.chat.map(m => m.role === "user" ? `<div class="msg me">${esc(m.content)}</div>`
-      : `<div class="msg ai ${m.err ? "err" : ""}"><div class="who">${ic("ai")}SmartGuardian IA${m.model ? ` · ${esc(m.model)}` : ""}${m.secs ? ` · ${fmtN(m.secs, 0)} s` : ""}</div>${md(m.content)}</div>`).join("")
-      : '<div class="empty">Pergunte algo sobre o PC. A cada pergunta o assistente recebe um resumo atual: processos com pontuação, conexões, portas abertas, aparelhos na rede, inicialização e alertas.</div>'}
-      ${st.aiBusy ? '<div class="msg ai"><div class="who">' + ic("ai") + 'SmartGuardian IA</div><span class="dots">Pensando</span></div>' : ""}</div>
+      : `<div class="msg ai ${m.err ? "err" : ""}"><div class="who">${ic("ai")}SmartGuardian IA${m.model ? ` · ${esc(m.model)}` : ""}${m.secs ? ` · ${fmtN(m.secs, 0)} s` : ""}</div>${m.err ? esc(m.content) : md(m.content)}${m.tools && m.tools.length ? `<div class="tools-used">Consultou:${m.tools.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}</div>`).join("")
+      : `<div class="empty">Pergunte algo sobre o PC. O assistente sempre vê a visão geral (processos, conexões, portas, rede local, inicialização, alertas, GPU) e, ${cfg.tools !== false ? "quando a pergunta pede, consulta cada sensor em detalhe." : "a cada pergunta, recebe o resumo completo."}</div>`}
+      ${st.aiBusy ? `<div class="msg ai"><div class="who">${ic("ai")}SmartGuardian IA</div><span class="dots">${st.aiSteps.length ? "Consultando" : "Pensando"}</span>${st.aiSteps.length ? `<div class="steps">${st.aiSteps.map(s => `<span>✓ ${esc(s)}</span>`).join("")}</div>` : ""}</div>` : ""}</div>
     <div style="display:grid;gap:8px">
-      <div class="toolbar">${["Tem algo estranho rodando no PC?", "Analise os processos sem assinatura", "O que mudou na inicialização?", "Explique as portas abertas", "Quem são os aparelhos na minha rede?"].map(q => `<button class="chip" data-ask="${esc(q)}" ${st.aiBusy ? "disabled" : ""}>${esc(q)}</button>`).join("")}</div>
+      <div class="toolbar">${["Tem algo estranho rodando no PC?", "Analise os processos sem assinatura", "O que mudou na inicialização?", "Explique as portas abertas", "Quem são os aparelhos na minha rede?", "Sugira otimizações para o PC"].map(q => `<button class="chip" data-ask="${esc(q)}" ${st.aiBusy ? "disabled" : ""}>${esc(q)}</button>`).join("")}</div>
       <form class="composer" id="ask"><input id="askq" type="text" placeholder="Pergunte sobre a rede, os processos ou os alertas" aria-label="Pergunta" ${st.aiBusy ? "disabled" : ""}><button class="btn primary" aria-label="Enviar" ${st.aiBusy ? "disabled" : ""}>${ic("send")}</button></form>
     </div></div>`;
 };
@@ -704,6 +778,8 @@ V.settings = () => {
     ${row("Ativar o assistente", "", tg("s-ai", s.ai.enabled))}
     ${row("Endereço do servidor", "", `<input type="text" id="s-ai-url" value="${esc(s.ai.url)}">`)}
     ${row("Modelo", modelHint(), `<span class="btn-row" style="flex-wrap:nowrap;align-items:center;gap:4px">${modelSelect(s.ai.model)}<button class="icon-btn" data-act="models-refresh" title="Buscar de novo no LM Studio" aria-label="Buscar modelos de novo">${ic("refresh")}</button></span>`)}
+    ${row("Respostas", "Técnicas: diagnóstico, detalhes com PID, caminhos, portas e números, mecanismo e próximos passos com comandos. Simples: curtas e diretas", sel("s-ai-detail", [["tecnico", "Técnicas e detalhadas"], ["simples", "Simples e curtas"]], s.ai.detail || "tecnico"))}
+    ${row("Consultar os sensores (ferramentas)", "A IA vê a visão geral e busca o detalhe de cada sensor conforme a pergunta. Desligado: manda um resumo fixo (para modelos sem suporte a ferramentas)", tg("s-ai-tools", s.ai.tools !== false))}
   </div>
   <div class="set-group"><h4>Serviços externos (opcional)</h4>
     ${row("Chave da API do VirusTotal", "Envia só o hash do arquivo, nunca o arquivo. Grátis em virustotal.com", `<input type="password" id="s-vt" value="${esc(s.vt_key)}" placeholder="Não configurada">`)}
@@ -720,7 +796,50 @@ V.settings = () => {
 };
 
 /* ---------------- IA ---------------- */
-const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*-] /gm, "• ").replace(/`([^`]+)`/g, '<span class="mono">$1</span>');
+// Markdown das respostas da IA: títulos, listas, tabelas, blocos de código, negrito, itálico e código.
+// Tudo passa por esc() antes: texto do modelo nunca vira HTML.
+const mdInline = t => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+  .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>");
+const MD_BLOCK = /^\s*(```|#{1,6}\s|\|.*\|\s*$|[-*•]\s|\d+[.)]\s|([-*_])(\s*\2){2,}\s*$)/;
+function md(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n"), out = [];
+  const cells = l => l.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^\s*```/.test(l)) {
+      const code = []; i++;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i++]);
+      i++; out.push(`<pre>${esc(code.join("\n"))}</pre>`); continue;
+    }
+    const h = l.match(/^\s*#{1,6}\s+(.*)/);
+    if (h) { out.push(`<h4>${mdInline(h[1].replace(/^#+\s*/, ""))}</h4>`); i++; continue; }  // "### ### Título" vira um título só
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1])) {
+      const head = cells(l), body = []; i += 2;
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) body.push(cells(lines[i++]));
+      out.push(`<table><thead><tr>${head.map(c => `<th>${mdInline(c)}</th>`).join("")}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td>${mdInline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    const li = l.match(/^\s*([-*•]|\d+[.)])\s+(.*)/);
+    if (li) {
+      const ordered = /\d/.test(li[1]), items = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^\s*([-*•]|\d+[.)])\s+(.*)/);
+        if (m && /\d/.test(m[1]) === ordered) { items.push(m[2]); i++; }
+        else if (items.length && lines[i].trim() && /^\s{2,}/.test(lines[i]) && !MD_BLOCK.test(lines[i])) { items[items.length - 1] += " " + lines[i].trim(); i++; }
+        else break;
+      }
+      out.push(`<${ordered ? "ol" : "ul"}>${items.map(x => `<li>${mdInline(x)}</li>`).join("")}</${ordered ? "ol" : "ul"}>`);
+      continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const para = [lines[i++]];
+    while (i < lines.length && lines[i].trim() && !MD_BLOCK.test(lines[i])) para.push(lines[i++]);
+    out.push(`<p>${para.map(mdInline).join("<br>")}</p>`);
+  }
+  return `<div class="md">${out.join("")}</div>`;
+}
 async function aiStatus() {
   try { st.aiStatus = await call("ai_status"); } catch (e) { st.aiStatus = { reachable: false, models: [], model_list: [] }; }
   if (st.view === "ai" || st.view === "settings") render();
@@ -737,14 +856,16 @@ async function loadChats() {
 function openChat(id) { if (st.aiBusy) return toast("Espere a resposta terminar"); st.chatId = id; try { localStorage.setItem("sg.chat", id || ""); } catch (e) {} return loadChats(); }
 async function waitChat(chatId, job) {
   // a resposta é gravada no banco pelo Python; aqui só esperamos e recarregamos a conversa
-  st.aiBusy = true; if (st.view === "ai") render();
+  st.aiBusy = true; st.aiSteps = []; if (st.view === "ai") render();
   try {
     for (let i = 0; i < 600; i++) {
       await new Promise(res => setTimeout(res, 1000));
-      if (job) { if ((await window.pywebview.api.ai_result(job)).done) break; }
-      else if (!(await window.pywebview.api.chat_get(chatId)).pending) break;
+      const r = job ? await window.pywebview.api.ai_result(job) : await window.pywebview.api.chat_get(chatId);
+      if (job ? r.done : !r.pending) break;
+      const steps = r.steps || [];
+      if (steps.length !== st.aiSteps.length) { st.aiSteps = steps; if (st.view === "ai") render(); }  // o funil ao vivo
     }
-  } finally { st.aiBusy = false; await loadChats(); }
+  } finally { st.aiBusy = false; st.aiSteps = []; await loadChats(); }
 }
 async function ask(q, pid = null) {
   if (st.aiBusy || !q.trim()) return;
@@ -776,6 +897,7 @@ async function saveSetting(id, el) {
     "s-close": { close_to_tray: v }, "s-int": { interval: n(v) }, "s-lan": { lan_interval: n(v) }, "s-pub": { public_ip: v },
     "s-hist": { history_days: n(v) }, "s-learn": { learning_days: n(v) }, "s-thr": { alert_threshold: n(v) },
     "s-ai": { ai: { enabled: v } }, "s-ai-url": { ai: { url: v } }, "s-ai-model": { ai: { model: v } }, "s-vt": { vt_key: v },
+    "s-ai-detail": { ai: { detail: v } }, "s-ai-tools": { ai: { tools: v } },
   };
   if (id.startsWith("s-n-")) map[id] = { notify: { [id.slice(4)]: v } };
   if (id === "s-startmenu") { await call("set_start_menu", v); toast(v ? "Atalho criado no menu Iniciar" : "Atalho removido do menu Iniciar", v ? "Procure \"SmartGuardian\" na busca do Windows." : ""); return; }
@@ -797,6 +919,7 @@ document.addEventListener("change", async e => {
     catch (err) { el.checked = !on; }
     return load(true);
   }
+  if (el.dataset.opt) { const s = optSelected(); el.checked ? s.add(el.dataset.opt) : s.delete(el.dataset.opt); st.optSel = s; return render(); }
   if (el.id && el.id.startsWith("s-")) saveSetting(el.id, el).catch(() => load(true));
 });
 async function finishEdit(save) {
@@ -885,6 +1008,19 @@ document.addEventListener("click", async e => {
       case "protect": {
         if (!await modal({ title: "Proteger a pasta do programa?", text: "Só administradores vão poder alterar os arquivos do SmartGuardian. Leva alguns segundos (a pasta inclui o ambiente do Python). Depois, para atualizar, use o Instalar.bat (ele pede administrador) ou um terminal como administrador.", ok: "Proteger" })) return;
         toast("Protegendo a pasta…"); const r = await call("protect_folder"); toast(r.open ? "Não deu para proteger tudo" : "Pasta protegida", r.open ? "Veja o log." : ""); return load(true);
+      }
+      case "opt-analyze": return optRun("opt_analyze");
+      case "opt-ai": return goAsk("Analise o desempenho e o espaço do PC e sugira otimizações: o que limpar na tela Otimização, o que desligar da inicialização e o que mais pesa agora.");
+      case "opt-all": { const it = (st.data.optimize || {}).items || []; st.optSel = new Set(it.filter(x => x.size > 0 || !x.known).map(x => x.id)); return render(); }
+      case "opt-default": st.optSel = null; return render();
+      case "opt-clean": {
+        const it = ((st.data.optimize || {}).items || []).filter(x => optSelected().has(x.id));
+        if (!it.length) return toast("Marque pelo menos um item");
+        const total = it.reduce((a, x) => a + (x.known ? x.size : 0), 0);
+        const slow = it.some(x => x.how === "dism"), bin = it.some(x => x.how === "recycle");
+        if (!await modal({ title: `Limpar ${it.length} ite${it.length === 1 ? "m" : "ns"}?`, ok: "Limpar", danger: bin,
+          text: `${it.map(x => esc(x.label)).join(", ")}.<br><br>Cerca de <b>${fmtB(total)}</b>${slow ? " mais o que o DISM liberar (pode levar de 5 a 20 min)" : ""}. Arquivos em uso ficam.${bin ? " <b>A Lixeira não dá para desfazer.</b>" : ""}` })) return;
+        return optRun("opt_clean", it.map(x => x.id));
       }
       case "ai-new": st.histOpen = false; return openChat(null);
       case "hist": st.histOpen = !st.histOpen; return render();

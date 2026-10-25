@@ -6,12 +6,13 @@ painel mostrar, em vez de exceções que o JavaScript não entende.
 from __future__ import annotations
 
 import functools
+import json
 import logging
 import threading
 import time
 import uuid
 
-from core import ai
+from core import ai, tools
 from core.guard import Guard
 
 from . import win
@@ -93,6 +94,9 @@ class Api:
             out["stats"] = g.db.q("select * from rule_stats order by false_pos desc, alerts desc")
             out["weights"] = g.rules["weights"]
         elif view == "ai":
+            out["ai"] = g.settings.get("ai")
+        elif view == "optimize":
+            out["optimize"] = g.optimize_state()
             out["ai"] = g.settings.get("ai")
         return out
 
@@ -207,20 +211,24 @@ class Api:
         history = [r for k, r in enumerate(rows) if not r["err"]
                    and not (r["role"] == "user" and k + 1 < len(rows) and rows[k + 1]["err"])]
         job = uuid.uuid4().hex
-        self._jobs[job] = {"done": False, "chat_id": chat_id}
+        self._jobs[job] = {"done": False, "chat_id": chat_id, "steps": []}
+
+        def step(name, args):  # a tela mostra ao vivo o que a IA está consultando
+            self._jobs[job]["steps"].append(tools.label(name, args))
 
         def run():
-            model, secs = None, None
+            model, secs, used = None, None, []
             try:
-                r = self._g.ask(history, int(pid) if pid else None)
+                r = self._g.ask(history, int(pid) if pid else None, on_step=step)
                 answer, err, model, secs = r["text"], 0, r["model"], r["secs"]
-                log.info("IA respondeu: %s em %.1f s", model, secs)
+                used = [tools.label(n, a) for n, a in r.get("tools", [])]
+                log.info("IA respondeu: %s em %.1f s; consultou: %s", model, secs, ", ".join(used) or "nada")
             except Exception as e:
                 log.warning("IA: %s", e)
                 answer, err = str(e) or type(e).__name__, 1
-            db.x("insert into chat_msgs(chat_id, ts, role, content, err, model, secs) values(?,?,?,?,?,?,?)",
-                 (chat_id, time.time(), "assistant", answer, err, model, secs))
-            self._jobs[job] = {"done": True, "chat_id": chat_id}
+            db.x("insert into chat_msgs(chat_id, ts, role, content, err, model, secs, tools) values(?,?,?,?,?,?,?,?)",
+                 (chat_id, time.time(), "assistant", answer, err, model, secs, json.dumps(used, ensure_ascii=False)))
+            self._jobs[job] = {"done": True, "chat_id": chat_id, "steps": used}
         threading.Thread(target=run, name="ia", daemon=True).start()
         return {"job": job, "chat_id": chat_id}
 
@@ -241,9 +249,50 @@ class Api:
         chat = self._g.db.one("select id, ts, title from chats where id=?", (chat_id,))
         if not chat:
             return {"chat": None, "msgs": []}
-        msgs = self._g.db.q("select role, content, err, ts, model, secs from chat_msgs where chat_id=? order by id", (chat_id,))
-        pending = any(j.get("chat_id") == chat_id and not j["done"] for j in self._jobs.values())
-        return {"chat": chat, "msgs": msgs, "pending": pending}
+        msgs = self._g.db.q("select role, content, err, ts, model, secs, tools from chat_msgs where chat_id=? order by id", (chat_id,))
+        for m in msgs:
+            try:
+                m["tools"] = json.loads(m["tools"] or "[]")
+            except ValueError:
+                m["tools"] = []
+        live = next((j for j in self._jobs.values() if j.get("chat_id") == chat_id and not j["done"]), None)
+        return {"chat": chat, "msgs": msgs, "pending": bool(live), "steps": live["steps"] if live else []}
+
+    # ---------- otimização ----------
+    @_safe
+    def opt_analyze(self):
+        """Mede em segundo plano (pode levar alguns segundos com a pasta Temp cheia); a tela consulta opt_job."""
+        return self._start_job("analisar", lambda prog: self._g.optimize_state(refresh=True, max_age=0))
+
+    @_safe
+    def opt_clean(self, ids):
+        ids = [str(i) for i in (ids or [])]
+        if not ids:
+            raise RuntimeError("Marque pelo menos um item.")
+        return self._start_job("limpar", lambda prog: self._g.optimize_clean(ids, prog))
+
+    def opt_job(self, job):
+        r = self._jobs.get(job, {"done": True})
+        if r.get("done"):
+            self._jobs.pop(job, None)
+        return r
+
+    def _start_job(self, name, fn):
+        job = uuid.uuid4().hex
+        self._jobs[job] = {"done": False, "step": ""}
+
+        def prog(text):
+            self._jobs[job]["step"] = text
+
+        def run():
+            try:
+                result, err = fn(prog), ""
+            except Exception as e:
+                log.exception("otimização: %s", name)
+                result, err = None, str(e) or type(e).__name__
+            self._jobs[job] = {"done": True, "result": result if name == "limpar" else None, "error": err}
+        threading.Thread(target=run, name=f"otimizacao-{name}", daemon=True).start()
+        return {"job": job}
 
     @_safe
     def chat_delete(self, chat_id):

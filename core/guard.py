@@ -26,7 +26,7 @@ from pathlib import Path
 
 import psutil
 
-from . import ai, conns as C, firewall, lan, procs as P, rules as R, startup, vt
+from . import ai, conns as C, firewall, lan, optimize, procs as P, rules as R, startup, tools, vt
 from .gpu import Gpu, GpuProcesses
 from .system import System
 
@@ -75,6 +75,8 @@ class Guard:
         self._alert_lock = threading.Lock()   # consulta + insert do alerta sem duplicar
         self.resolver = C.Resolver()
         self.firewall = firewall.Firewall()
+        self._opt: dict = {"items": [], "insights": [], "ts": 0.0}   # última análise de otimização
+        self._opt_lock = threading.Lock()
         self.lock = threading.RLock()
         self.listeners: list = []          # fn(title, text, sev): notificações
         self.on_change: list = []          # fn(): algo mudou (ícone, painel)
@@ -735,7 +737,75 @@ class Guard:
             lines.append("\nO USUÁRIO MARCOU COMO NORMAL: " + ", ".join(os.path.basename(t["label"]) for t in trusted))
         return "\n".join(lines)
 
-    def ask(self, history: list[dict], pid: int | None = None) -> str:
+    def ai_overview(self, pid: int | None = None) -> str:
+        """Visão geral enxuta para o funil: o PC inteiro em poucas linhas e os destaques de cada sensor.
+        O detalhe a IA busca pelas ferramentas (core/tools.py)."""
+        s = self.system.snapshot()
+        h = s["hist"]
+        left = self.settings.learning_left()
+        with self.lock:
+            procs, listens, conns, items = list(self.procs), list(self.listens), list(self.conns), list(self.startup)
+        g = self.gpu.snapshot()
+        devs = self.devices()
+        open_ = self.open_alerts()
+        lines = [f"PC {s['host']} · {s['os']} · ligado há {s['uptime'] / 3600:.1f} h · {s['cpu_name']}",
+                 f"CPU {h['cpu'][-1] if h['cpu'] else 0:.0f} % · memória {s['mem_used'] / 2**30:.1f} de {s['mem_total'] / 2**30:.0f} GB"
+                 f" · disco {s['drive']} {s['disk_used'] / 2**30:.0f} de {s['disk_total'] / 2**30:.0f} GB"
+                 f" · rede {h['down'][-1] if h['down'] else 0:.1f}↓ {h['up'][-1] if h['up'] else 0:.1f}↑ Mb/s",
+                 f"Aprendizado: {'faltam %.1f dias (só regras fortes avisam)' % left if left else 'terminou'} · "
+                 "pontuação de risco: 0 normal, 30+ atenção, 60+ alto"]
+        if g["available"]:
+            lines.append(f"GPU {g['name']} · uso {g.get('util') or 0} % · VRAM {(g.get('vram_used') or 0) / 2**30:.1f} de "
+                         f"{g['mem_total'] / 2**30:.1f} GB · {g.get('temp')} °C · {g.get('power') or 0:.0f} W")
+
+        risky = sorted([p for p in procs if p["score"] >= 15], key=lambda p: -p["score"])
+        unsigned = {p["exe"] for p in procs if p["sig"] in ("none", "invalid") and p["exe"]}
+        lines.append(f"\nPROCESSOS: {len(procs)} · {len(risky)} com pontuação 15+ · {len(unsigned)} programas sem assinatura válida")
+        lines += [f"  {p['name']} PID {p['pid']} pontuação {p['score']}: " + "; ".join(t for t, pts in p["reasons"] if pts > 0)
+                  for p in risky[:5]]
+        top = sorted(procs, key=lambda p: -p["rss"])[:3]
+        lines.append("  mais memória: " + ", ".join(f"{p['name']} {p['rss'] / 2**30:.1f} GB" for p in top))
+        hot = [p for p in sorted(procs, key=lambda p: -p["cpu"]) if p["cpu"] >= 5][:3]
+        if hot:
+            lines.append("  mais CPU: " + ", ".join(f"{p['name']} {p['cpu']:.0f} %" for p in hot))
+
+        inet = [c for c in conns if c["scope"] == "internet"]
+        susp = [c for c in conns if c["bad_port"]]
+        lines.append(f"\nCONEXÕES: {len(inet)} com a internet de {len({c['pid'] for c in inet})} programas"
+                     + (f" · {len(susp)} em PORTA SUSPEITA" if susp else ""))
+        reach = {}
+        for l in listens:
+            if l.get("exposure") in ("open", "lan", "") and l["scope"] != "pc":
+                reach.setdefault(f"{l['proto']} {l['port']} {l['proc']}", l.get("exposure"))
+        blocked = len({(l["proto"], l["port"]) for l in listens if l.get("exposure") == "blocked"})
+        prof = self.firewall.profile_name()
+        lines.append(f"PORTAS (rede {prof or '?'}): {len(reach)} alcançáveis de fora · {blocked} só escutando, bloqueadas pelo firewall")
+        lines += [f"  {k} · {'qualquer endereço' if v == 'open' else 'só rede local' if v == 'lan' else 'firewall não lido'}"
+                  for k, v in list(reach.items())[:8]]
+
+        online = [d for d in devs if d["online"]]
+        new_dev = [d for d in online if not d["known"]]
+        lines.append(f"\nREDE LOCAL: {len(online)} aparelhos online de {len(devs)} já vistos · {len(new_dev)} novos não reconhecidos")
+        lines += [f"  NOVO {d['ip']} {d['name'] or 'sem nome'} · {d['vendor'] or 'fabricante desconhecido'}" for d in new_dev[:5]]
+        new_su = [i for i in items if i.get("new")]
+        lines.append(f"INICIALIZAÇÃO: {len(items)} itens · {sum(1 for i in items if not i['windows'] and i['enabled'])} "
+                     f"ativos de outros fabricantes · {len(new_su)} novos")
+        lines += [f"  NOVO {i['name']} ({i['kind_label']})" for i in new_su[:5]]
+        lines.append(f"ALERTAS ABERTOS: {len(open_)}")
+        lines += [f"  [{datetime.fromtimestamp(a['ts']):%d/%m %H:%M}] {a['sev']}: {a['title']} — {a['detail'][:140]}" for a in open_[:5]]
+        opt = self._opt
+        if opt["ts"]:
+            total = sum(i["size"] for i in opt["items"] if i["default"])
+            lines.append(f"OTIMIZAÇÃO (análise de {datetime.fromtimestamp(opt['ts']):%H:%M}): {total / 2**30:.1f} GB "
+                         f"recuperáveis nos itens padrão · {len(opt['insights'])} sugestões")
+        if pid:
+            p = next((p for p in procs if p["pid"] == pid), None)
+            if p:
+                lines.append("\nPROCESSO QUE O USUÁRIO PEDIU PARA ANALISAR (use a ferramenta processo para o resto):\n"
+                             + _proc_line(p, full=True))
+        return "\n".join(lines)
+
+    def ask(self, history: list[dict], pid: int | None = None, on_step=None) -> dict:
         cfg = self.settings.get("ai")
         # sem modelo escolhido: o primeiro carregado (a lista vem com os carregados na frente)
         try:
@@ -747,8 +817,43 @@ class Guard:
             raise RuntimeError("Nenhum modelo carregado no LM Studio. Carregue um modelo e tente de novo.")
         # contexto do modelo que vai responder (o escolhido se carregado; senão o carregado que o LM Studio usa)
         info = next((m for m in listed if m["id"] == model and m["loaded"]), None) or next((m for m in listed if m["loaded"]), {})
-        return ai.chat(cfg["url"], model, self.ai_context(pid), history,
-                       context_tokens=info.get("ctx") or 0)  # {"text", "model", "secs"}
+        ctx = info.get("ctx") or 0
+        detail = cfg.get("detail", "tecnico")
+        kw = {"context_tokens": ctx, "max_tokens": ai.MAX_TOKENS.get(detail, 8000), "timeout": 300}
+        if cfg.get("tools", True):
+            try:
+                return ai.chat(cfg["url"], model, f"{ai.system_prompt(detail, True)}\n\nVISÃO GERAL DO PC AGORA:\n{self.ai_overview(pid)}",
+                               history, tools=tools.TOOLS, execute=lambda n, a, lim: tools.run(self, n, a, lim),
+                               on_step=on_step, **kw)
+            except ai.ToolsUnsupported as e:
+                log.info("modelo sem suporte a ferramentas (%s); usando o resumo completo", e)
+        # plano B: o resumo completo de antes, sem ferramentas
+        return ai.chat(cfg["url"], model, f"{ai.system_prompt(detail, False)}\n\nDADOS ATUAIS DO PC:\n{self.ai_context(pid)}",
+                       history, **kw)
+
+    # ---------- otimização ----------
+    def optimize_state(self, refresh: bool = False, max_age: float = 600) -> dict:
+        """Última análise (refaz se pedida e mais velha que max_age), sugestões e histórico de limpezas."""
+        with self._opt_lock:
+            if refresh and time.time() - self._opt["ts"] > max_age:
+                with self.lock:
+                    procs, items = list(self.procs), list(self.startup)
+                s = self.system.snapshot()
+                self._opt = {"items": optimize.analyze(),
+                             "insights": optimize.insights(procs, items, self.gpu.snapshot(), s, s["uptime"]),
+                             "ts": time.time()}
+            hist = self.db.q("select ts, item, label, freed, files, skipped, error from optimize_log order by id desc limit 30")
+            return {**self._opt, "history": hist, "not_done": optimize.NOT_DONE}
+
+    def optimize_clean(self, ids: list[str], progress=None) -> list[dict]:
+        results = optimize.clean(ids, progress)
+        now = time.time()
+        self.db.many("insert into optimize_log(ts, item, label, freed, files, skipped, error) values(?,?,?,?,?,?,?)",
+                     [(now, r["id"], r["label"], r["freed"], r["files"], r["skipped"], r["error"]) for r in results])
+        log.info("limpeza: %s", ", ".join(f"{r['id']} {r['freed'] / 2**20:.0f} MB" + (f" (erro: {r['error']})" if r["error"] else "")
+                                          for r in results))
+        self.optimize_state(refresh=True, max_age=0)  # mede de novo: a tela mostra o que sobrou
+        return results
 
     def report(self, with_ai: bool = False) -> Path:
         REPORTS.mkdir(exist_ok=True)

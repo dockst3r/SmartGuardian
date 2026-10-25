@@ -92,19 +92,39 @@ def _remote_scope(rule: dict) -> str:
 def exposure(rules: list[dict], profiles: list[dict], *, proto: str, port: int, exe: str, pid: int, laddr: str,
              services: dict[str, set[int]]) -> str:
     """profiles: os perfis ativos, [{"t": 4, "on": True, "allow": 0}]. services: serviço (minúsculo) → PIDs."""
+    return match(rules, profiles, proto=proto, port=port, exe=exe, pid=pid, laddr=laddr, services=services)[0]
+
+
+def describe(rule: dict | None) -> str:
+    """Texto curto da regra que liberou a porta, para a IA explicar o porquê."""
+    if not rule:
+        return ""
+    name = _one(rule, "Name")
+    name = "regra do Windows" if name.startswith("@") else f"regra \"{name}\""
+    parts = [f"programa {os.path.basename(os.path.expandvars(_one(rule, 'App')))}" if rule.get("App") else "qualquer programa",
+             f"serviço {_one(rule, 'Svc')}" if rule.get("Svc") else "",
+             "portas " + ",".join(rule.get("LPort", []) + rule.get("LPort2_10", [])) if rule.get("LPort") or rule.get("LPort2_10") else "qualquer porta",
+             "remoto " + ",".join(sum((rule.get(k, []) for k in ("RA4", "RA6")), [])) if rule.get("RA4") or rule.get("RA6") else "qualquer origem",
+             "perfis " + "/".join(rule["Profile"]) if rule.get("Profile") else "todos os perfis"]
+    return f"{name} ({', '.join(p for p in parts if p)})"
+
+
+def match(rules: list[dict], profiles: list[dict], *, proto: str, port: int, exe: str, pid: int, laddr: str,
+          services: dict[str, set[int]]) -> tuple[str, dict | None]:
+    """(exposição, regra que liberou ou None)."""
     try:
         if ipaddress.ip_address(laddr.split("%")[0]).is_loopback:
-            return "pc"
+            return "pc", None
     except ValueError:
         pass
     if not profiles:
-        return ""
+        return "", None
     if any(not p["on"] or p["allow"] for p in profiles):
-        return "open"   # firewall desligado (ou liberando tudo) num perfil ativo
+        return "open", None   # firewall desligado (ou liberando tudo) num perfil ativo
     active = {PROFILE_NAMES[p["t"]] for p in profiles}
     proto_n = "6" if proto == "TCP" else "17"
     exe_n = os.path.normcase(exe) if exe else ("system" if pid == 4 else "")
-    best = "blocked"
+    best, why = "blocked", None
     for r in rules:
         prof = r.get("Profile")
         if prof and not active & set(prof):
@@ -120,10 +140,10 @@ def exposure(rules: list[dict], profiles: list[dict], *, proto: str, port: int, 
         svc = _one(r, "Svc").lower()
         if svc and svc != "*" and pid not in services.get(svc, ()):
             continue
-        best = _remote_scope(r)
+        best, why = _remote_scope(r), r
         if best == "open":
-            return best
-    return best
+            return best, why
+    return best, why
 
 
 class Firewall:
@@ -159,6 +179,18 @@ class Firewall:
             return ""
         return exposure(self.rules, self.profiles, proto=proto, port=port, exe=exe, pid=pid, laddr=laddr,
                         services=self.services)
+
+    def why(self, *, proto: str, port: int, exe: str, pid: int, laddr: str) -> str:
+        """Qual regra libera a porta (texto), ou por que está bloqueada/aberta."""
+        if not self.ok:
+            return "firewall não lido"
+        scope, rule = match(self.rules, self.profiles, proto=proto, port=port, exe=exe, pid=pid, laddr=laddr,
+                            services=self.services)
+        if scope == "open" and rule is None:
+            return "firewall desligado ou liberando toda entrada no perfil ativo"
+        if scope == "blocked":
+            return f"nenhuma regra de entrada libera esta porta no perfil {self.profile_name()}"
+        return describe(rule) if rule else ""
 
 
 def _registry_rules() -> list[str]:

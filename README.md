@@ -22,7 +22,8 @@ Fica como um ícone de escudo na bandeja, com janela no estilo do Windows 11. Me
 | Processos | assinatura digital, quem abriu, linha de comando, rede, uso de GPU e VRAM e **por que a pontuação**; Analisar com IA, Abrir local, VirusTotal, Encerrar, Quarentena, Isso é normal |
 | Inicialização | chaves Run, pasta Inicializar, serviços automáticos e tarefas agendadas; ligar e desligar sem apagar nada |
 | Alertas | histórico por dia; Ciente, Isso é normal, Pausar 1 hora, Resumir com IA |
-| Assistente IA | conversa sobre o estado atual do PC; conversas salvas, com o modelo e o tempo de cada resposta; relatório do dia em HTML |
+| Otimização | mede o que dá para limpar (temporários, cache da Otimização de Entrega, despejos de travamento, relatórios de erro, shaders, Lixeira, limpeza do Windows Update pelo DISM) e mostra sugestões a partir dos sensores; limpa só o que você marcar, com prévia e confirmação |
+| Assistente IA | conversa que consulta cada sensor conforme a pergunta (o funil), com respostas técnicas e detalhadas; conversas salvas, com o modelo, o tempo e o que foi consultado; relatório do dia em HTML |
 | Configurações | intervalos, período de aprendizado, limite de aviso, tipos de aviso, modelo da IA (lista lida do LM Studio), VirusTotal, lista de confiança e quantos alarmes falsos cada regra já deu |
 
 O ícone muda de estado: escudo normal = tudo certo, ponto amarelo = atenção, ponto vermelho = risco
@@ -151,14 +152,41 @@ Hotspot e temperatura da memória não existem na API oficial para placas GeForc
 2. No LM Studio: carregue o modelo e ligue o servidor local (Developer → Start Server).
 3. No SmartGuardian: Assistente IA → Ativar.
 
-A cada pergunta vai junto um resumo em texto do estado do PC: processos com pontuação e motivos,
-programas sem assinatura, os que mais usam CPU e memória, GPU e quem a usa, conexões com a internet,
-portas abertas (separando as que o firewall libera das que só estão escutando, bloqueadas), aparelhos da rede (inclusive os que saíram), inicialização, alertas e a sua lista de
-confiança. O modelo é instruído a tratar esses textos só como dados (um programa malicioso pode
-escrever instruções na própria linha de comando). A parte da conversa enviada junto se ajusta ao
-contexto com que o LM Studio carregou o modelo: 4.000 caracteres em modelos de 8K, até 60.000 nos de 100K+. As conversas ficam salvas no banco local, e cada resposta mostra qual modelo respondeu e
-em quanto tempo, o que ajuda a comparar modelos. Em Configurações, o modelo é escolhido numa lista
-lida do próprio LM Studio (carregados primeiro); se o escolhido não estiver carregado, o app avisa.
+### O funil: visão geral sempre, detalhe sob demanda
+
+A cada pergunta, a IA recebe uma **visão geral** do PC (cerca de 1.500 caracteres): sistema, GPU, e
+os destaques de cada sensor (processos com pontuação, portas alcançáveis, aparelhos novos, itens novos
+na inicialização, alertas abertos, espaço recuperável). Para aprofundar, ela chama **ferramentas**, cada
+uma lendo um sensor do SmartGuardian, e cruza os resultados (uma porta leva ao processo, o processo à
+assinatura, às conexões e à inicialização):
+
+| Ferramenta | O que devolve |
+|---|---|
+| `processos` | lista filtrada (risco, sem assinatura, CPU, memória, GPU) com pontuação e motivos |
+| `processo` | um processo inteiro: linha de comando, pai, filhos, assinatura, conexões, portas com a regra do firewall, inicialização, alertas |
+| `conexoes` | conexões por programa, com destino, nome DNS e estado |
+| `portas` | portas abertas, se o firewall as libera (e qual regra) e para que serve cada porta comum |
+| `rede_local` | adaptador, roteador, DNS, latência e aparelhos com IP, MAC, fabricante e quando foram vistos |
+| `inicializacao` | itens de terceiros, novos ou desativados |
+| `alertas` | histórico do banco, por dias e texto |
+| `sistema` | CPU, memória, discos, rede e plano de energia, com mínimo, média e máximo |
+| `gpu` | todos os dados da placa e quem a usa |
+| `otimizacao` | o que dá para limpar e as sugestões de desempenho |
+
+Na conversa aparece ao vivo o que a IA está consultando, e cada resposta mostra no fim
+"Consultou: …". Nenhuma ferramenta muda nada no PC. Encerrar, desligar da inicialização e limpar
+continuam sendo botões que você aperta. Se o modelo não aceitar ferramentas, o app manda o resumo
+completo de antes (ou desligue em **Configurações → Consultar os sensores**).
+
+**Respostas técnicas ou simples** (Configurações → Respostas): o padrão é técnico, com diagnóstico,
+detalhes com PID, caminhos, portas, regras do firewall e números, o mecanismo por trás e "Próximos
+passos" com comandos do PowerShell. Tabelas, títulos e blocos de código aparecem formatados.
+
+O modelo é instruído a tratar os dados só como dados (um programa malicioso pode escrever instruções
+na própria linha de comando), a citar só telas que existem e comandos reais do Windows, e a nunca
+recomendar limpar o Prefetch, a memória ou o registro. O espaço para a conversa e para os resultados
+das ferramentas se ajusta ao contexto com que o LM Studio carregou o modelo. As conversas ficam
+salvas no banco local, com o modelo, o tempo e o que foi consultado em cada resposta.
 
 ### Qual modelo usar com 12 GB de vídeo
 
@@ -173,8 +201,28 @@ Medido com este app numa **RTX 5070 de 12 GB** (Ryzen 7 9800X3D, 32 GB de RAM), 
 | Gemma 4 26B A4B QAT (Q4_0) | 14,4 GB | 35–43 tokens/s | 10–26 s | Melhor qualidade, mas não cabe inteiro: parte vai para a RAM (o processo chegou a 18,6 GB de RAM). |
 | Qwen3.8 27B (Q4_K_M) | 17,7 GB | — | — | Não cabe; as tentativas não terminaram. |
 
-Modelos que "pensam" antes de responder (Gemma 4, Qwen 3.x) funcionam: o app reserva espaço para o
-raciocínio. Cada resposta mostra o modelo e o tempo, então dá para comparar no seu próprio PC.
+Com o funil e as respostas técnicas, o Qwen3.5 9B (contexto de 25K) levou de 13 a 22 s por pergunta,
+consultando 1 ou 2 ferramentas e respondendo com 2.700 a 5.500 caracteres. Modelos que "pensam" antes
+de responder (Gemma 4, Qwen 3.x) funcionam: o app reserva espaço para o raciocínio. Cada resposta mostra o modelo e o tempo, então dá para comparar no seu próprio PC.
+
+## Otimização
+
+**Analisar** só mede. **Limpar** apaga só os itens marcados, depois de confirmar, e só arquivos mais
+velhos que o limite de cada item (24 h nos temporários, 7 dias em despejos e relatórios de erro).
+Arquivo em uso fica. Junções e links de pasta não são seguidos, então um link dentro do Temp não leva
+a limpeza para outra pasta. Cada limpeza fica no histórico, com quanto liberou.
+
+As sugestões vêm dos sensores e não mudam nada sozinhas: disco acima de 85 %, PC ligado há mais de
+7 dias, memória acima de 85 % (e quem usa), muitos programas na inicialização, VRAM ocupada com a GPU
+parada, plano de energia de economia, pasta Downloads grande e arquivo de hibernação grande.
+
+De propósito, ficam de fora:
+- **Prefetch:** o Windows usa para abrir os programas mais rápido. Limpar deixa tudo mais lento por dias.
+- **"Limpar memória":** RAM livre é desperdiçada. O Windows usa a sobra como cache e solta sozinho.
+- **Limpeza de registro:** não tem ganho medido e pode quebrar programas.
+- **Apagar `SoftwareDistribution\Download` direto:** com o Windows Update ligado, ele restaura e
+  reorganiza a pasta (medido aqui: 99 mil arquivos "apagados" voltaram). A limpeza das atualizações é
+  pelo DISM, no item "Limpeza do Windows Update".
 
 ## Privacidade: o que sai do PC
 
@@ -198,14 +246,18 @@ Banco, configurações, log, relatórios e quarentena ficam na pasta do programa
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-53 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
+67 casos. Programas comuns que **não** podem avisar (Discord, Git, Store, Defender, svchost
 verdadeiro, instalador assinado em Temp, certificado vencido, jogo e LM Studio com GPU a 100 %);
 ataques que **precisam** avisar (svchost falso em Temp e em `C:\Windows\Tasks`, porta 4444, AppData
 sem assinatura na internet, Word abrindo PowerShell codificado, assinatura adulterada, minerador em
 AppData, `powershell` com qualquer abreviação de `-EncodedCommand`); portas (conexão que chega e
 loopback não contam, porta temporária nunca é "porta de invasão"); firewall (regra de app da Store, Wi-Fi Direct e perfil inativo não expõem porta; firewall desligado expõe tudo); as proteções de Encerrar e
 Quarentena (testadas sem encerrar nem mover nada, inclusive PID reaproveitado e o próprio Python);
-a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histórico enviado à IA.
+a limpeza do histórico, que mantém o que foi aprendido; o tamanho do histórico enviado à IA; a
+otimização, em pastas temporárias criadas pelo teste (só arquivos velhos saem, a pasta do item fica,
+junção para outra pasta não é seguida, arquivo em uso fica, analisar nunca apaga, nenhum item mexe no
+Prefetch ou no Windows Update); e o funil da IA com um LM Studio falso (ferramenta e depois resposta,
+limite de rodadas, argumentos quebrados, erro de ferramenta vira texto).
 
 ## Arquitetura
 
@@ -218,7 +270,8 @@ a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histór
              CPU/mem    NVML + uso  processos conexões   regras e     ping, ARP,   Run, pasta, serviços,
              disco/rede por programa (psutil)  DNS rev.   perfil ativo fabricante   tarefas agendadas
                          |
- Análise        signature.py (WinVerifyTrust)   rules.py (pontuação)   ai.py (LM Studio)   vt.py
+ Análise        signature.py (WinVerifyTrust)   rules.py (pontuação)   ai.py (LM Studio) + tools.py   vt.py
+                optimize.py (análise e limpeza segura, sugestões)
                          |
  Dados          store.py → settings.json, smartguardian.db (SQLite), rules.json
 ```
@@ -231,6 +284,9 @@ a limpeza do histórico, que mantém o que foi aprendido; e o tamanho do histór
 | `ui/win.py` | detalhes do Windows: ícone, administrador, instância única, atalho no menu Iniciar, iniciar com o Windows, tema |
 | `Instalar.bat` | instala ou atualiza: ambiente, bibliotecas, atalho no menu Iniciar |
 | `core/firewall.py` | se uma porta aberta é alcançável: regras do firewall (registro), perfil ativo, programa e serviço |
+| `core/ai.py` | prompts (técnico e simples) e o laço de ferramentas com o LM Studio |
+| `core/tools.py` | as ferramentas da IA, uma por sensor; só leem |
+| `core/optimize.py` | o que dá para limpar, a limpeza segura e as sugestões de desempenho |
 | `docs/prototipo.html` | protótipo navegável da interface, com dados de exemplo |
 | `docs/visao-geral.png` | print da Visão geral (dados identificáveis trocados por exemplos) |
 
