@@ -121,6 +121,40 @@ class Suspicious(unittest.TestCase):
         self.assertTrue(s.strong)
 
 
+class Gpu(unittest.TestCase):
+    """Regra do minerador: GPU alta e contínua por programa sem assinatura válida."""
+
+    def setUp(self):
+        self.rules = R.load()
+
+    def test_signed_game_at_full_gpu_is_quiet(self):
+        s = R.score(proc(r"C:\Program Files (x86)\Steam\steamapps\common\Jogo\jogo.exe", Signature("file", "Valve Corp.")), self.rules, gpu=99)
+        self.assertEqual(s.total, 0)
+
+    def test_lm_studio_signed_is_quiet(self):
+        s = R.score(proc(rf"{HOME}\AppData\Local\Programs\LM Studio\resources\llama-server.exe", Signature("file", "Element Labs Inc.")), self.rules, gpu=95)
+        self.assertLess(s.total, 30)
+
+    def test_miner_in_appdata(self):
+        s = R.score(proc(rf"{HOME}\AppData\Roaming\svc\xmr.exe", UNSIGNED), self.rules, gpu=90, conns=[internet(3333)])
+        self.assertGreaterEqual(s.total, 60)
+
+    def test_low_gpu_does_not_count(self):
+        s = R.score(proc(rf"{HOME}\AppData\Roaming\tool\tool.exe", UNSIGNED), self.rules, gpu=30)
+        self.assertNotIn("gpu_untrusted", [r for r, _, _ in s.reasons])
+
+
+class HistorySize(unittest.TestCase):
+    def test_small_or_unknown_context_keeps_4000(self):
+        from core.ai import history_chars
+        self.assertEqual(history_chars(0), 4000)
+        self.assertEqual(history_chars(8192), 4000 if (8192 - 5500) * 2.5 < 4000 else int((8192 - 5500) * 2.5))
+
+    def test_big_context_is_capped(self):
+        from core.ai import history_chars
+        self.assertEqual(history_chars(118016), 60000)
+
+
 class Limits(unittest.TestCase):
     def test_rules_file_cannot_raise_common_weight_above_25(self):
         with tempfile.TemporaryDirectory() as d:

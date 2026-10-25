@@ -182,6 +182,8 @@ td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 220px; }
 .hist-pop .c .del:hover { color: var(--bad); background: var(--bad-bg); }
 /* linha de status do assistente: pílula + botão de ícone na mesma altura */
 .ai-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 28px; }
+.link-txt { border: 0; background: none; padding: 0; color: var(--ink); font-size: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.link-txt:hover { color: var(--accent); }
 .icon-btn { width: 28px; height: 28px; border: 0; background: transparent; border-radius: 4px; display: grid; place-items: center; padding: 0; color: var(--ink-2); }
 .icon-btn:hover { background: var(--hover); color: var(--ink); }
 .icon-btn:active { background: var(--press); }
@@ -377,7 +379,7 @@ function render() {
 }
 function renderNav() {
   const s = st.data.summary, k = s.by_kind;
-  const badge = { lan: k.lan, proc: k.proc + k.cpu, startup: k.startup, all: s.open };
+  const badge = { lan: k.lan, proc: k.proc + k.cpu + (k.gpu || 0), startup: k.startup, all: s.open };
   $("#nav").innerHTML = `<div class="brand">${ic("shieldok")}<span>SmartGuardian</span>${st.data.admin ? "" : '<span class="pill warn">sem admin</span>'}</div>` +
     NAV.map(([key, l, i, b]) => {
       if (key === "sep") return '<div class="sep"></div>';
@@ -418,10 +420,26 @@ function metrics() {
     <div class="card metric"><div class="lbl"><span>Rede</span><span>↑ ${fmtN(last(h.up))} Mb/s</span></div><div class="val">${fmtN(last(h.down))}<small> Mb/s ↓</small></div>${spark(h.down)}</div></div>`;
 }
 
+function gpuCard() {
+  const g = st.data.gpu, users = st.data.gpu_users || [];
+  if (!g || !g.available) return "";
+  const h = g.hist, gb = b => fmtN(b / 2 ** 30, 1) + " GB";
+  const margin = g.margin != null ? g.margin : (g.slowdown && g.temp != null ? g.slowdown - g.temp : null);
+  const tempCls = margin != null && margin <= 5 ? "bad" : margin != null && margin <= 15 ? "warn" : "";
+  return `<div class="card"><h3><span>GPU <small>${esc(g.name)} · driver ${esc(g.driver)}</small></span></h3>
+    <div class="grid g4">
+      <div class="metric"><div class="lbl"><span>Uso</span><span>${g.clock ? g.clock + " MHz" : ""}</span></div><div class="val">${g.util ?? "—"}<small> %</small></div>${spark(h.util, 100)}</div>
+      <div class="metric"><div class="lbl"><span>VRAM</span><span>${gb(g.mem_total)}</span></div><div class="val">${gb(g.vram_used || 0)}<small> · ${fmtN(h.vram.length ? h.vram[h.vram.length - 1] : 0, 0)} %</small></div>${spark(h.vram, 100)}</div>
+      <div class="metric"><div class="lbl"><span>Temperatura</span><span title="A placa reduz o desempenho a ${g.slowdown} °C e desliga a ${g.shutdown} °C">${margin != null ? margin + " °C de folga" : ""}</span></div><div class="val" ${tempCls ? `style="color:var(--${tempCls})"` : ""}>${g.temp ?? "—"}<small> °C${g.fan != null ? ` · ventoinha ${g.fan} %` : ""}</small></div>${spark(h.temp, g.shutdown || 100)}</div>
+      <div class="metric"><div class="lbl"><span>Potência</span><span>limite ${g.power_limit ? fmtN(g.power_limit, 0) + " W" : "—"}</span></div><div class="val">${g.power != null ? fmtN(g.power, 0) : "—"}<small> W</small></div>${spark(h.power, g.power_limit || undefined)}</div>
+    </div>
+    ${users.length ? `<p class="sub" style="margin-top:10px">Usando a GPU: ${users.map(p => `<button class="link-txt" data-proc="${p.pid}">${esc(p.name)}</button> ${fmtB(p.vram)}${p.gpu >= 1 ? ` · ${fmtN(p.gpu, 0)} %` : ""}`).join(" &nbsp;·&nbsp; ")}</p>` : ""}
+  </div>`;
+}
 V.overview = () => {
   const d = st.data, S = d.system;
   return `<div class="vhead"><div><h2>Visão geral</h2><p class="sub">${esc(S.host)} · ${esc(S.os)} · ligado há ${uptime(S.uptime)}</p></div></div>
-  ${banners()}${statusCard()}${metrics()}
+  ${banners()}${statusCard()}${metrics()}${gpuCard()}
   <div class="grid g3">
     <div class="card"><h3>Alertas recentes <button class="btn small" data-go="alerts">Todos</button></h3><div class="list">
       ${d.alerts.length ? d.alerts.map(alertRow).join("") : '<div class="empty">Nenhum alerta até agora.</div>'}</div></div>
@@ -492,9 +510,10 @@ V.conns = () => {
 
 V.procs = () => {
   const d = st.data, q = st.procQuery.toLowerCase();
-  const rows = d.procs.filter(p => (st.procFilter === "all" || (st.procFilter === "attn" ? p.score >= 15 : p.sig === "none" || p.sig === "invalid"))
-      && (!q || (p.name + " " + p.exe + " " + p.pid).toLowerCase().includes(q)))
-    .sort((a, b) => b.score - a.score || b.cpu - a.cpu || b.rss - a.rss);
+  const usesGpu = p => p.gpu >= 1 || p.vram > 0;
+  const keep = { all: () => true, attn: p => p.score >= 15, unsigned: p => p.sig === "none" || p.sig === "invalid", gpu: usesGpu }[st.procFilter] || (() => true);
+  const rows = d.procs.filter(p => keep(p) && (!q || (p.name + " " + p.exe + " " + p.pid).toLowerCase().includes(q)))
+    .sort(st.procFilter === "gpu" ? (a, b) => b.vram - a.vram || b.gpu - a.gpu : (a, b) => b.score - a.score || b.cpu - a.cpu || b.rss - a.rss);
   const p = d.procs.find(x => x.pid === st.pick) || rows[0];
   const attn = d.procs.filter(p => p.score >= 15).length, uns = d.procs.filter(p => p.sig === "none" || p.sig === "invalid").length;
   return `<div class="vhead"><div><h2>Processos</h2><p class="sub">${d.procs.length} processos · ${d.procs.filter(p => p.score >= d.threshold || p.strong).length} acima do limite de aviso (${d.threshold}) · ${uns} sem assinatura válida</p></div></div>
@@ -502,14 +521,15 @@ V.procs = () => {
     <label class="search">${ic("search")}<input id="pq" type="text" placeholder="Nome, caminho ou PID" value="${esc(st.procQuery)}" aria-label="Procurar processo"></label>
     <button class="chip" data-pf="attn" aria-pressed="${st.procFilter === "attn"}">Com pontuação (${attn})</button>
     <button class="chip" data-pf="unsigned" aria-pressed="${st.procFilter === "unsigned"}">Sem assinatura (${uns})</button>
+    <button class="chip" data-pf="gpu" aria-pressed="${st.procFilter === "gpu"}">Usando a GPU (${d.procs.filter(usesGpu).length})</button>
     <button class="chip" data-pf="all" aria-pressed="${st.procFilter === "all"}">Todos (${d.procs.length})</button>
   </div>
   <div class="split">
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Nome</th><th class="r">PID</th><th class="r">CPU</th><th class="r">Memória</th><th>Assinatura</th><th>Risco</th></tr></thead>
+      <thead><tr><th>Nome</th><th class="r">PID</th><th class="r">CPU</th><th class="r">Memória</th><th class="r">GPU</th><th>Assinatura</th><th>Risco</th></tr></thead>
       <tbody>${rows.slice(0, 400).map(r => `<tr data-pick="${r.pid}" class="link ${p && r.pid === p.pid ? "sel" : ""}">
         <td><b style="font-weight:600">${esc(r.name || "(sem nome)")}</b><div class="muted clip" style="font-size:11.5px;max-width:300px" title="${esc(r.exe)}">${esc(r.exe || "—")}</div></td>
-        <td class="r num">${r.pid}</td><td class="r num">${fmtN(r.cpu)} %</td><td class="r num">${fmtB(r.rss)}</td><td>${sigCell(r)}</td><td>${scoreCell(r.score, r.sev)}</td></tr>`).join("")
+        <td class="r num">${r.pid}</td><td class="r num">${fmtN(r.cpu)} %</td><td class="r num">${fmtB(r.rss)}</td><td class="r num" title="Uso da GPU · VRAM dedicada">${r.gpu >= 1 ? fmtN(r.gpu, 0) + " %" : ""}${r.gpu >= 1 && r.vram ? " · " : ""}${r.vram ? fmtB(r.vram) : r.gpu >= 1 ? "" : '<span class="muted">—</span>'}</td><td>${sigCell(r)}</td><td>${scoreCell(r.score, r.sev)}</td></tr>`).join("")
         || `<tr><td colspan="6" class="muted">${st.procFilter === "attn" && !q ? "Nenhum processo com pontuação. Tudo normal." : "Nenhum processo encontrado."}</td></tr>`}</tbody></table></div>
     ${p ? procDetail(p) : ""}
   </div>`;
@@ -526,6 +546,7 @@ function procDetail(p) {
         ${p.cmdline ? `<dt>Comando</dt><dd class="mono" style="max-height:90px;overflow:auto">${esc(p.cmdline)}</dd>` : ""}
         <dt>Usuário</dt><dd>${esc(p.user || "—")}</dd>
         <dt>Desde</dt><dd>${p.started ? new Date(p.started * 1000).toLocaleString("pt-BR") : "—"}</dd>
+        ${p.gpu >= 1 || p.vram ? `<dt>GPU</dt><dd>${fmtN(p.gpu, 0)} % de uso · ${fmtB(p.vram)} de VRAM</dd>` : ""}
         <dt>Rede</dt><dd>${p.net.length ? esc(p.net.join(", ")) : p.net_count ? `${p.net_count} conexões locais` : "nenhuma conexão"}${p.listen.length ? `<br>Escutando em ${esc(p.listen.slice(0, 5).join(", "))}` : ""}</dd>
       </dl>
     </div>
@@ -640,7 +661,7 @@ V.settings = () => {
   const sel = (id, opts, v) => `<select id="${id}">${opts.map(([val, label]) => `<option value="${val}" ${String(val) === String(v) ? "selected" : ""}>${label}</option>`).join("")}</select>`;
   const RL = { fake_system_name: "Nome do Windows fora do lugar (forte)", bad_port: "Porta de invasão (forte)", temp_dir: "Pasta temporária", invalid_signature: "Assinatura quebrada",
     encoded_command: "Comando codificado", office_spawns_shell: "Office abrindo terminal", unsigned: "Sem assinatura", user_dir: "Pasta do usuário", downloads_dir: "Pasta Downloads",
-    wrong_parent: "Processo pai errado", unsigned_internet: "Sem assinatura na internet", listen_all: "Porta aberta para a rede", new_exe: "Programa novo", unsigned_protected: "Sem assinatura em pasta protegida" };
+    wrong_parent: "Processo pai errado", unsigned_internet: "Sem assinatura na internet", listen_all: "Porta aberta para a rede", new_exe: "Programa novo", unsigned_protected: "Sem assinatura em pasta protegida", gpu_untrusted: "GPU alta sem assinatura (minerador)" };
   return `<div class="vhead"><div><h2>Configurações</h2><p class="sub">Salvas em C:\\SmartGuardian\\settings.json. Pesos das regras em rules.json (as regras comuns valem no máximo 25 pontos).</p></div>
     <button class="btn" data-folder="root">${ic("folder")}Abrir pasta do programa</button></div>
   <div class="set-group"><h4>Geral</h4>
@@ -661,6 +682,8 @@ V.settings = () => {
     ${row("Mudança na inicialização, serviços ou tarefas", "", tg("s-n-startup", s.notify.startup))}
     ${row("Detecção do Windows Defender", "", tg("s-n-defender", s.notify.defender))}
     ${row("Uso de CPU acima de 90 % por 2 minutos", "", tg("s-n-high_cpu", s.notify.high_cpu))}
+    ${row("GPU perto do limite de temperatura", "Quando sobram 5 °C ou menos até a placa reduzir o desempenho", tg("s-n-gpu_temp", s.notify.gpu_temp))}
+    ${row("VRAM da GPU quase cheia", "Acima de 97 % por 30 s; com modelo de IA carregado isso é comum", tg("s-n-vram", s.notify.vram))}
   </div>
   <div class="set-group"><h4>IA local (LM Studio)</h4>
     ${row("Ativar o assistente", "", tg("s-ai", s.ai.enabled))}

@@ -12,10 +12,10 @@ Fica como um ícone de escudo na bandeja, com janela no estilo do Windows 11. Me
 
 | Tela | O que mostra |
 |---|---|
-| Visão geral | situação geral, CPU, memória, disco e rede (últimos 2 min), alertas recentes, aparelhos na rede |
+| Visão geral | situação geral, CPU, memória, disco e rede (últimos 2 min); GPU com uso, VRAM, temperatura e folga até o limite térmico, potência, driver e quem está usando a placa; alertas recentes, aparelhos na rede |
 | Rede local | conexão, roteador, DNS, latência da internet; aparelhos da rede com IP, MAC, fabricante e quando apareceram; clique no nome para renomear |
 | Conexões | cada conexão de cada programa, com nome DNS; portas abertas neste PC; exportar CSV |
-| Processos | assinatura digital, quem abriu, linha de comando, rede e **por que a pontuação**; Analisar com IA, Abrir local, VirusTotal, Encerrar, Quarentena, Isso é normal |
+| Processos | assinatura digital, quem abriu, linha de comando, rede, uso de GPU e VRAM e **por que a pontuação**; Analisar com IA, Abrir local, VirusTotal, Encerrar, Quarentena, Isso é normal |
 | Inicialização | chaves Run, pasta Inicializar, serviços automáticos e tarefas agendadas; ligar e desligar sem apagar nada |
 | Alertas | histórico por dia; Ciente, Isso é normal, Pausar 1 hora, Resumir com IA |
 | Assistente IA | conversa sobre o estado atual do PC; conversas salvas; relatório do dia em HTML |
@@ -66,6 +66,7 @@ partir de 60. Pesos e listas ficam em `rules.json`, criado na primeira execuçã
 | Pasta do usuário (AppData, ProgramData) · Downloads | 15 |
 | Processo pai errado · sem assinatura e na internet · porta aberta para a rede | 10 |
 | Programa novo depois do aprendizado · sem assinatura em pasta protegida | 5 |
+| GPU acima de 50 % por ~15 s em programa sem assinatura válida (perfil de minerador) | 25 |
 
 ### Contra falso positivo
 
@@ -88,6 +89,14 @@ partir de 60. Pesos e listas ficam em `rules.json`, criado na primeira execuçã
 Conferida como o Windows confere, sem internet (WinVerifyTrust): assinatura no próprio arquivo,
 catálogo do Windows (System32) ou pacote da Microsoft Store/MSIX. Certificado vencido sem carimbo de
 tempo conta como assinado, com observação.
+
+## GPU
+
+Placas NVIDIA: uso, VRAM, temperatura, folga até a placa reduzir o desempenho, potência, ventoinha,
+clock e versão do driver, pela biblioteca oficial da NVIDIA (`nvidia-ml-py`, que usa o `nvml.dll` do
+driver). Uso de GPU e VRAM **por programa** vem dos contadores do próprio Windows, e vale para
+qualquer fabricante. Avisos opcionais: GPU perto do limite térmico e VRAM cheia por 30 s.
+Hotspot e temperatura da memória não existem na API oficial para placas GeForce.
 
 ## Ações com proteção
 

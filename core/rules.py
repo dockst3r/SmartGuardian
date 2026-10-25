@@ -34,6 +34,7 @@ DEFAULT_RULES = {
         "unsigned_internet": 10,
         "listen_all": 10,
         "new_exe": 5,
+        "gpu_untrusted": 25,
         "unsigned_protected": 5,
     },
     "bad_ports": [4444, 1337, 31337, 6666, 6667, 12345, 54321],
@@ -62,6 +63,7 @@ LABELS = {
     "new_exe": "Programa novo, visto depois do período de aprendizado",
     "unsigned_protected": "Sem assinatura, mas numa pasta que só o administrador grava",
     "trusted_location": "Assinatura válida anula a regra de local",
+    "gpu_untrusted": "Uso alto e contínuo da GPU ({pct:.0f} %) por programa sem assinatura válida (perfil de minerador)",
 }
 
 WINDIR = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -115,8 +117,9 @@ def under(path: str, dirs: list[str]) -> bool:
     return any(d and (path == d or path.startswith(d + "\\")) for d in dirs)
 
 
-def score(proc, rules: dict, *, conns=(), listens=(), new_exe: bool = False) -> Score:
-    """proc: core.procs.Proc com sig preenchida. conns/listens: core.conns.Conn deste processo."""
+def score(proc, rules: dict, *, conns=(), listens=(), new_exe: bool = False, gpu: float = 0.0) -> Score:
+    """proc: core.procs.Proc com sig preenchida. conns/listens: core.conns.Conn deste processo.
+    gpu: uso de GPU sustentado (%), o menor valor das últimas leituras."""
     s = Score()
     if not proc.exe or proc.sig is None:
         return s
@@ -171,6 +174,8 @@ def score(proc, rules: dict, *, conns=(), listens=(), new_exe: bool = False) -> 
             s.add(rules, "listen_all", port=open_all)
     if new_exe:
         s.add(rules, "new_exe")
+    if gpu >= 50 and not trusted:  # jogos, LM Studio, navegadores são assinados; minerador costuma não ser
+        s.add(rules, "gpu_untrusted", pct=gpu)
     s.total = max(0, s.total)
     return s
 

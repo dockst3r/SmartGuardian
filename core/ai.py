@@ -47,14 +47,21 @@ def models(base: str) -> list[str]:
     return [m["id"] for m in model_list(base)]
 
 
-HISTORY_CHARS = 4000  # conversa enviada junto: as mensagens mais recentes que couberem
+def history_chars(context_tokens: int) -> int:
+    """Quanto da conversa mandar junto. Do contexto do modelo saem ~3.000 tokens do resumo do PC e ~2.500 do
+    raciocínio e da resposta; o resto vai para a conversa (~2,5 caracteres por token em português com caminhos).
+    Contexto desconhecido ou pequeno (8K): 4.000 caracteres. Teto de 60.000 para não pesar em modelos de 100K+."""
+    if not context_tokens:
+        return 4000
+    return int(max(4000, min(60000, (context_tokens - 5500) * 2.5)))
 
 
-def chat(base: str, model: str, context: str, history: list[dict], timeout: float = 180) -> dict:
+def chat(base: str, model: str, context: str, history: list[dict], timeout: float = 180, context_tokens: int = 0) -> dict:
     """Devolve {"text", "model" (o que o LM Studio usou de fato), "secs"}."""
+    limit = history_chars(context_tokens)
     msgs, size = [], 0
     for m in reversed([m for m in history if m.get("role") in ("user", "assistant")]):
-        if msgs and size + len(m["content"]) > HISTORY_CHARS:
+        if msgs and size + len(m["content"]) > limit:
             break
         msgs.insert(0, {"role": m["role"], "content": m["content"]})
         size += len(m["content"])

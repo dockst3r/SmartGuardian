@@ -19,7 +19,8 @@ DEFAULTS = {
     "learning_days": 7,
     "learning_started": 0,       # preenchido na primeira execução
     "alert_threshold": 30,
-    "notify": {"new_device": True, "process": True, "startup": True, "defender": True, "high_cpu": False},
+    "notify": {"new_device": True, "process": True, "startup": True, "defender": True, "high_cpu": False,
+               "gpu_temp": True, "vram": False},
     "close_to_tray": True,
     "public_ip": False,          # consulta api.ipify.org; desligado para nada sair do PC sem você pedir
     "ai": {"enabled": False, "url": "http://localhost:1234/v1", "model": "", "auto": False},

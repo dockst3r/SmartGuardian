@@ -20,13 +20,14 @@ import subprocess
 import sys
 import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 
 import psutil
 
 from . import ai, conns as C, lan, procs as P, rules as R, startup, vt
+from .gpu import Gpu, GpuProcesses
 from .system import System
 
 # Processos sem os quais o Windows cai (tela azul) ou trava a sessão.
@@ -48,6 +49,9 @@ class Guard:
         self.db = Db()
         self.rules = R.load()
         self.system = System()
+        self.gpu = Gpu()
+        self.gpu_procs = GpuProcesses()
+        self._gpu_hist: dict[int, deque] = {}   # PID → últimas leituras de uso de GPU (para "uso sustentado")
         self.resolver = C.Resolver()
         self.lock = threading.RLock()
         self.listeners: list = []          # fn(title, text, sev): notificações
@@ -103,7 +107,27 @@ class Guard:
     def _system_loop(self) -> None:
         while not self._stop.is_set():
             self.system.sample()
+            self.gpu.sample()
+            self.check_gpu()
             self._stop.wait(2)
+
+    def check_gpu(self) -> None:
+        """Avisa de GPU perto do limite térmico (onde ela começa a perder desempenho) e de VRAM cheia."""
+        g = self.gpu
+        if not g.available or not g.now:
+            return
+        day = datetime.now().strftime("%Y-%m-%d")
+        temp, margin = g.now.get("temp"), g.now.get("margin")
+        hot = (margin is not None and margin <= 5) or (temp and g.slowdown and temp >= g.slowdown - 3)
+        if hot and len(g.hist["temp"]) >= 3 and min(list(g.hist["temp"])[-3:]) >= (temp - 2):  # não é pico de 1 leitura
+            self.alert("gpu", f"gpu:temp:{day}", "warn", f"GPU a {temp} °C, perto do limite",
+                       f"{g.name} · reduz o desempenho a {g.slowdown} °C e desliga a {g.shutdown} °C · "
+                       f"{margin} °C de folga · confira ventilação e poeira", {"view": "overview"}, category="gpu_temp")
+        vram = list(g.hist["vram"])[-15:]  # ~30 s
+        if len(vram) >= 15 and min(vram) >= 97:
+            self.alert("gpu", f"gpu:vram:{day}", "warn", "VRAM da GPU quase cheia há 30 s",
+                       f"{g.name} · {vram[-1]:.0f} % de {g.mem_total / 2**30:.0f} GB · programas e modelos de IA podem ficar lentos",
+                       {"view": "procs"}, category="vram")
 
     def _proc_loop(self) -> None:
         while not self._stop.is_set():
@@ -190,6 +214,10 @@ class Guard:
             if pid not in alive:
                 self._pobj.pop(pid, None)
                 self._hot.pop(pid, None)
+                self._gpu_hist.pop(pid, None)
+        gpu_now = self.gpu_procs.sample()
+        for pid, v in gpu_now.items():
+            self._gpu_hist.setdefault(pid, deque(maxlen=3)).append(v["gpu"])
 
         now = time.time()
         learning = self.settings.learning_left() > 0
@@ -207,7 +235,10 @@ class Guard:
         for p in procs:
             first = self._first_seen.get(p.exe, 0)
             is_new = bool(p.exe) and not learning and first > learning_end and now - first < 7 * 86400
-            sc = R.score(p, self.rules, conns=by_pid_c.get(p.pid, ()), listens=by_pid_l.get(p.pid, ()), new_exe=is_new)
+            gh = self._gpu_hist.get(p.pid)
+            gpu_sustained = min(gh) if gh and len(gh) == gh.maxlen else 0.0  # uso em 3 leituras seguidas (~15 s)
+            sc = R.score(p, self.rules, conns=by_pid_c.get(p.pid, ()), listens=by_pid_l.get(p.pid, ()), new_exe=is_new,
+                         gpu=gpu_sustained)
             user_trusted = bool(p.exe) and sc.total > 0 and self.trust_key(p.exe, p.sig) in self._trust
             if user_trusted:
                 sc = R.Score(0, [("user_trust", "Na sua lista de confiança", 0)], False)
@@ -222,6 +253,7 @@ class Guard:
                 "score": sc.total, "sev": sev, "strong": sc.strong, "trusted": user_trusted,
                 "reasons": [[t, pts] for _, t, pts in sc.reasons], "rules": [r for r, _, pts in sc.reasons if pts > 0],
                 "net": net[:6], "net_count": len(pc), "listen": [f"{c.laddr}:{c.lport}" for c in by_pid_l.get(p.pid, [])],
+                "gpu": gpu_now.get(p.pid, {}).get("gpu", 0.0), "vram": gpu_now.get(p.pid, {}).get("vram", 0),
             })
             if p.exe and (sc.strong or sc.total >= threshold):
                 cur = per_exe.get(p.exe)
@@ -526,7 +558,7 @@ class Guard:
         worst = "bad" if any(a["sev"] == "bad" for a in open_) else "warn" if open_ else None
         return {"open": len(open_), "worst": worst, "learning_left": self.settings.learning_left(),
                 "paused_until": self.paused_until if self.paused_until > time.time() else 0, "last_check": self.last_check,
-                "by_kind": {k: sum(1 for a in open_ if a["kind"] == k) for k in ("proc", "lan", "startup", "defender", "cpu")}}
+                "by_kind": {k: sum(1 for a in open_ if a["kind"] == k) for k in ("proc", "lan", "startup", "defender", "cpu", "gpu")}}
 
     def ai_context(self, pid: int | None = None) -> str:
         """Resumo em texto do estado do PC para o modelo. Compacto de propósito: o LM Studio costuma carregar
@@ -557,6 +589,15 @@ class Guard:
 
         top_cpu = [p for p in sorted(procs, key=lambda p: -p["cpu"]) if p["name"] and p["cpu"] >= 1][:5]
         top_mem = [p for p in sorted(procs, key=lambda p: -p["rss"]) if p["name"]][:5]
+        g = self.gpu.snapshot()
+        users = [p for p in sorted(procs, key=lambda p: -(p["vram"] + p["gpu"] * 2**24)) if p["vram"] or p["gpu"] >= 1][:6]
+        if g["available"]:
+            lines.append(f"\nGPU: {g['name']} · driver {g['driver']} · uso {g.get('util', 0)} % · VRAM "
+                         f"{(g.get('vram_used') or 0) / 2**30:.1f} de {g['mem_total'] / 2**30:.1f} GB · {g.get('temp')} °C "
+                         f"(reduz desempenho a {g['slowdown']} °C) · {g.get('power') or 0:.0f} W de {g.get('power_limit') or 0:.0f} W")
+        if users:
+            lines.append(("" if g["available"] else "\n") + "USANDO A GPU: " + ", ".join(
+                f"{p['name']} ({p['gpu']:.0f} %, {p['vram'] / 2**20:.0f} MB VRAM, {_sig_short(p)})" for p in users))
         lines.append("\nMAIS CPU: " + (", ".join(f"{p['name']} {p['cpu']:.0f} %" for p in top_cpu) or "nenhum processo acima de 1 %"))
         lines.append("MAIS MEMÓRIA: " + ", ".join(f"{p['name']} {p['rss'] / 2**20:.0f} MB" for p in top_mem))
 
@@ -625,10 +666,17 @@ class Guard:
     def ask(self, history: list[dict], pid: int | None = None) -> str:
         cfg = self.settings.get("ai")
         # sem modelo escolhido: o primeiro carregado (a lista vem com os carregados na frente)
-        model = cfg.get("model") or next(iter(ai.models(cfg["url"])), "")
+        try:
+            listed = ai.model_list(cfg["url"])
+        except OSError:
+            listed = []
+        model = cfg.get("model") or next((m["id"] for m in listed), "")
         if not model:
             raise RuntimeError("Nenhum modelo carregado no LM Studio. Carregue um modelo e tente de novo.")
-        return ai.chat(cfg["url"], model, self.ai_context(pid), history)  # {"text", "model", "secs"}
+        # contexto do modelo que vai responder (o escolhido se carregado; senão o carregado que o LM Studio usa)
+        info = next((m for m in listed if m["id"] == model and m["loaded"]), None) or next((m for m in listed if m["loaded"]), {})
+        return ai.chat(cfg["url"], model, self.ai_context(pid), history,
+                       context_tokens=info.get("ctx") or 0)  # {"text", "model", "secs"}
 
     def report(self, with_ai: bool = False) -> Path:
         REPORTS.mkdir(exist_ok=True)

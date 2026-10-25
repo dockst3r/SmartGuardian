@@ -47,7 +47,7 @@ class Api:
     def state(self, view="overview"):
         g = self._g
         sysinfo = g.system.snapshot()
-        out = {"summary": g.summary(), "admin": win.is_admin(), "system": sysinfo, "now": time.time(),
+        out = {"summary": g.summary(), "admin": win.is_admin(), "system": sysinfo, "now": time.time(), "gpu": g.gpu.snapshot(),
                "interval": g.settings.get("interval", 5)}
         with g.lock:
             procs = list(g.procs)
@@ -59,6 +59,7 @@ class Api:
             out["alerts"] = g.alerts(6)
             out["devices"] = [d for d in devices if d["online"]][:8]
             out["top_mem"] = sorted(procs, key=lambda p: -p["rss"])[:5]
+            out["gpu_users"] = sorted([p for p in procs if p["vram"] or p["gpu"] >= 1], key=lambda p: -p["vram"])[:5]
             out["risky"] = sorted([p for p in procs if p["score"] >= g.settings.get("alert_threshold", 30)], key=lambda p: -p["score"])[:5]
         elif view == "lan":
             out["devices"] = devices
