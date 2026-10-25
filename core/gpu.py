@@ -31,6 +31,7 @@ class Gpu:
         self.hist = {k: deque(maxlen=SAMPLES) for k in ("util", "vram", "temp", "power")}
         self.now: dict = {}
         self._h = None
+        self._lock = threading.Lock()  # sample() roda numa thread; snapshot() na da janela
         if N is None:
             return
         try:
@@ -71,15 +72,17 @@ class Gpu:
             "fan": self._try(N.nvmlDeviceGetFanSpeed, h),
             "clock": self._try(N.nvmlDeviceGetClockInfo, h, N.NVML_CLOCK_GRAPHICS),
         }
-        self.hist["util"].append(self.now["util"] or 0)
-        self.hist["vram"].append(100 * (self.now["vram_used"] or 0) / self.mem_total if self.mem_total else 0)
-        self.hist["temp"].append(self.now["temp"] or 0)
-        self.hist["power"].append(self.now["power"] or 0)
+        with self._lock:
+            self.hist["util"].append(self.now["util"] or 0)
+            self.hist["vram"].append(100 * (self.now["vram_used"] or 0) / self.mem_total if self.mem_total else 0)
+            self.hist["temp"].append(self.now["temp"] or 0)
+            self.hist["power"].append(self.now["power"] or 0)
 
     def snapshot(self) -> dict:
+        with self._lock:
+            hist = {k: [round(v, 1) for v in d] for k, d in self.hist.items()}
         return {"available": self.available, "name": self.name, "driver": self.driver, "mem_total": self.mem_total,
-                "slowdown": self.slowdown, "shutdown": self.shutdown, **self.now,
-                "hist": {k: [round(v, 1) for v in d] for k, d in self.hist.items()}}
+                "slowdown": self.slowdown, "shutdown": self.shutdown, **self.now, "hist": hist}
 
 
 # ---------- uso de GPU por programa: contadores de desempenho do Windows (PDH) ----------
