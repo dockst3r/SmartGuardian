@@ -107,7 +107,9 @@ tempo conta como assinado, com observação.
 A cada pergunta vai junto um resumo em texto do estado do PC: processos com pontuação e motivos,
 alertas, portas abertas, aparelhos da rede e itens novos da inicialização. O modelo é instruído a
 tratar esses textos só como dados (um programa malicioso pode escrever instruções na própria linha
-de comando). As conversas ficam salvas no banco local.
+de comando). As conversas ficam salvas no banco local, e cada resposta mostra qual modelo respondeu e
+em quanto tempo, o que ajuda a comparar modelos. Em Configurações, o modelo é escolhido numa lista
+lida do próprio LM Studio (carregados primeiro); se o escolhido não estiver carregado, o app avisa.
 
 ### Qual modelo usar com 12 GB de vídeo (ex.: RTX 5070)
 
